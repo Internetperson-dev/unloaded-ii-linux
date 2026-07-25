@@ -14,6 +14,7 @@
     <PackageReference Include="Reloaded.Mod.Interfaces" ExcludeAssets="runtime" />
     <PackageReference Include="Reloaded.SharedLib.Hooks" ExcludeAssets="runtime" />
     <PackageReference Include="Reloaded.Imgui.Hook.Direct3D11" />
+    <PackageReference Include="System.Reflection.MetadataLoadContext" />
   </ItemGroup>
 
   <ItemGroup>

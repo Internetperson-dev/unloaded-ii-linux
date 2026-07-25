@@ -25,6 +25,15 @@ public sealed record CatalogMod
     public JsonObject? UserConfig { get; set; }
     public string? UserConfigPath { get; init; }
     public bool ConfigExpanded { get; set; }
+
+    /// <summary>
+    /// Friendly labels for config settings, read from the mod DLL's
+    /// <c>[Display(Name = ...)]</c> attributes (config JSON key to display name).
+    /// Empty when the mod has no DLL or declares no display names; the overlay then
+    /// falls back to the raw JSON keys.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> ConfigDisplayNames { get; init; } =
+        new Dictionary<string, string>();
 }
 
 /// <summary>
@@ -77,6 +86,10 @@ public sealed class ModCatalog(string gameDirectory)
                 UserConfigPath = configPath,
                 UserConfig = TryLoadConfig(configPath)
                     ?? TryLoadConfig(Path.Combine(mod.Directory, "Config.json")),
+                ConfigDisplayNames = ModConfigMetadata.ReadDisplayNames(
+                    string.IsNullOrWhiteSpace(mod.Manifest.ModDll)
+                        ? null
+                        : Path.Combine(mod.Directory, mod.Manifest.ModDll)),
             });
         }
 

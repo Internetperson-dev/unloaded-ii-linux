@@ -158,9 +158,16 @@ public sealed class OverlayUi(
             if (property.Value is not JsonValue value)
                 continue;
 
+            // Prefer the mod's [Display(Name)] label; the "##key" suffix keeps the
+            // ImGui ID unique and stable even if two settings share a display name.
+            var label = mod.ConfigDisplayNames.TryGetValue(property.Key, out var displayName)
+                && !string.IsNullOrWhiteSpace(displayName)
+                    ? $"{displayName}##{property.Key}"
+                    : property.Key;
+
             if (value.TryGetValue<bool>(out var boolValue))
             {
-                if (_imgui.Checkbox(property.Key, ref boolValue))
+                if (_imgui.Checkbox(label, ref boolValue))
                 {
                     config[property.Key] = boolValue;
                     changed = true;
@@ -173,7 +180,7 @@ public sealed class OverlayUi(
                 // Clamp to int range: InputInt uses a 32-bit ref, and mod
                 // configs with large longs would silently truncate otherwise.
                 var intValue = (int)Math.Clamp(longValue, int.MinValue, int.MaxValue);
-                if (_imgui.InputInt(property.Key, ref intValue))
+                if (_imgui.InputInt(label, ref intValue))
                 {
                     config[property.Key] = (long)intValue;
                     changed = true;
@@ -183,7 +190,7 @@ public sealed class OverlayUi(
             {
                 // Floating-point field (also catches JSON numbers like 1.5
                 // that don't match the long branch above).
-                if (_imgui.InputDouble(property.Key, ref numberValue))
+                if (_imgui.InputDouble(label, ref numberValue))
                 {
                     config[property.Key] = numberValue;
                     changed = true;
@@ -194,7 +201,7 @@ public sealed class OverlayUi(
                 var buffer = new byte[256];
                 var bytes = Encoding.UTF8.GetBytes(stringValue);
                 Array.Copy(bytes, buffer, Math.Min(bytes.Length, buffer.Length - 1));
-                var edited = _imgui.InputText(property.Key, buffer);
+                var edited = _imgui.InputText(label, buffer);
 
                 if (edited)
                 {
