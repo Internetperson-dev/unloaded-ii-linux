@@ -134,8 +134,17 @@ public sealed class OverlayUi(
             if (mod.UserConfig is not null)
             {
                 _imgui.SameLine(0, 12);
-                if (_imgui.SmallButton(mod.ConfigExpanded ? "close settings" : "settings"))
-                    mod.ConfigExpanded = !mod.ConfigExpanded;
+                var label = mod.ConfigExpanded ? "close settings" : "settings";
+                if (baseMods)
+                {
+                    if (_imgui.SmallButton($"[{label}]###{mod.ModId}-cfg"))
+                        mod.ConfigExpanded = !mod.ConfigExpanded;
+                }
+                else
+                {
+                    if (_imgui.SmallButton(label))
+                        mod.ConfigExpanded = !mod.ConfigExpanded;
+                }
                 if (mod.ConfigExpanded)
                     RenderConfigEditor(mod);
             }
