@@ -258,25 +258,60 @@ public class ModScannerTests
     }
 
     [Fact]
-    public void DiscoversNestedOptionDirectories()
+    public void DoesNotExposeGroupChildrenWithoutMetadata()
     {
         using var temp = new TempDirectory();
         var modDir = temp.CreateMod("mods/NestedOptions", "mod.nested.options");
 
-        // Mirror the ps4reverts layout: two-level options tree.
-        var optionsDir = Path.Combine(modDir, "Options");
-        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Almighty Skill Icon"));
-        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Ryuji Shoes"));
-        Directory.CreateDirectory(Path.Combine(optionsDir, "Epilepsy", "All-Out-Attack Animation"));
-        Directory.CreateDirectory(Path.Combine(optionsDir, "Others", "One-way Airlock Color"));
+        // Two-level structure but no release manifest: only the direct children
+        // of Options/ are treated as options, exactly like v0.6.1.
+        Directory.CreateDirectory(Path.Combine(modDir, "Options", "Censorship", "Ryuji Shoes"));
 
         var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
         var mod = Assert.Single(result.Mods);
 
-        // All four leaves should appear; no grouping folders (Censorship etc.).
+        var option = Assert.Single(mod.Options);
+        Assert.Equal("Censorship", option.Name);
+        Assert.Equal("Options/Censorship", option.RelativePath);
+    }
+
+    [Fact]
+    public void UpdateMetadataExposesTwoLevelOptionsNotContentFolders()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/NestedOptions", "mod.nested.options");
+
+        // Mirror the ps4reverts layout: Options/<category>/<option>/<content...>.
+        // Content folders (BASE.CPK, FONT, ...) must NOT surfaced as options.
+        var optionsDir = Path.Combine(modDir, "Options");
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Almighty Skill Icon", "BASE.CPK", "FONT", "ICON.DDS"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Ryuji Shoes", "BASE.CPK"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Epilepsy", "All-Out-Attack Animation", "BASE.CPK"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Others", "One-way Airlock Color", "BASE.CPK"));
+
+        File.WriteAllText(Path.Combine(modDir, "Sewer56.Update.Metadata.json"), """
+        {
+          "ExtraData": null, "Type": 0, "Version": "1.5.0",
+          "Hashes": {
+            "Files": [
+              { "RelativePath": "ModConfig.json", "Hash": 1 },
+              { "RelativePath": "Options\\Censorship\\Almighty Skill Icon\\BASE.CPK\\FONT\\ICON.DDS", "Hash": 2 },
+              { "RelativePath": "Options\\Censorship\\Ryuji Shoes\\BASE.CPK", "Hash": 3 },
+              { "RelativePath": "Options\\Epilepsy\\All-Out-Attack Animation\\BASE.CPK", "Hash": 4 },
+              { "RelativePath": "Options\\Others\\One-way Airlock Color\\BASE.CPK", "Hash": 5 }
+            ]
+          },
+          "IgnoreRegexes": [], "IncludeRegexes": [], "DeltaData": null
+        }
+        """);
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+        var mod = Assert.Single(result.Mods);
+
+        // The four option folders, never the grouping folders or content dirs.
         Assert.Equal(4, mod.Options.Count);
-        Assert.DoesNotContain(mod.Options, o => o.Name == "Censorship");
-        Assert.DoesNotContain(mod.Options, o => o.Name == "Epilepsy");
+        Assert.DoesNotContain(mod.Options, o => o.Name is "Censorship" or "Epilepsy" or "Others");
+        Assert.DoesNotContain(mod.Options, o => o.Name is "BASE.CPK" or "FONT" or "ICON.DDS");
 
         var almighty = mod.Options.Single(o => o.Name == "Almighty Skill Icon");
         Assert.Equal("Options/Censorship/Almighty Skill Icon", almighty.RelativePath);
@@ -290,16 +325,59 @@ public class ModScannerTests
     }
 
     [Fact]
-    public void NestedDisabledOptionDirectoriesAreNormalized()
+    public void UpdateMetadataDropsFoldersOutsideDeclaredOptions()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/MetaMod", "meta.options.mod");
+
+        Directory.CreateDirectory(Path.Combine(modDir, "Options", "Category", "Existing Option", "BASE.CPK"));
+        // Stray folder under Options/ that is not declared as an option.
+        Directory.CreateDirectory(Path.Combine(modDir, "Options", "Stray", "one"));
+
+        File.WriteAllText(Path.Combine(modDir, "Sewer56.Update.Metadata.json"), """
+        {
+          "ExtraData": null, "Type": 0, "Version": "1.5.0",
+          "Hashes": {
+            "Files": [
+              { "RelativePath": "ModConfig.json", "Hash": 1 },
+              { "RelativePath": "Options\\Category\\Existing Option\\BASE.CPK", "Hash": 2 }
+            ]
+          },
+          "IgnoreRegexes": [], "IncludeRegexes": [], "DeltaData": null
+        }
+        """);
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+        var mod = Assert.Single(result.Mods);
+
+        var option = Assert.Single(mod.Options);
+        Assert.Equal("Existing Option", option.Name);
+        Assert.Equal("Options/Category/Existing Option", option.RelativePath);
+    }
+
+    [Fact]
+    public void UpdateMetadataNestedDisabledOptionsAreNormalized()
     {
         using var temp = new TempDirectory();
         var modDir = temp.CreateMod("mods/NestedOptions", "mod.nested.options");
 
         var optionsDir = Path.Combine(modDir, "Options");
-        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship"));
-        // Leaf disabled by OptionStateHealer rename.
-        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Ryuji Shoes.disabled"));
-        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Almighty Skill Icon"));
+        // Option disabled by OptionStateHealer rename, inside an enabled group.
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Ryuji Shoes.disabled", "BASE.CPK"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Almighty Skill Icon", "BASE.CPK"));
+
+        File.WriteAllText(Path.Combine(modDir, "Sewer56.Update.Metadata.json"), """
+        {
+          "Type": 0, "Version": "1.5.0",
+          "Hashes": {
+            "Files": [
+              { "RelativePath": "Options\\Censorship\\Ryuji Shoes\\BASE.CPK", "Hash": 1 },
+              { "RelativePath": "Options\\Censorship\\Almighty Skill Icon\\BASE.CPK", "Hash": 2 }
+            ]
+          },
+          "IgnoreRegexes": [], "IncludeRegexes": [], "DeltaData": null
+        }
+        """);
 
         var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
         var mod = Assert.Single(result.Mods);
@@ -311,16 +389,47 @@ public class ModScannerTests
     }
 
     [Fact]
-    public void UpdateMetadataDeclaresOptionsMissingOnDisk()
+    public void UpdateMetadataDisabledGroupingFolderStillExposesLeaves()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/NestedOptions", "mod.nested.options");
+
+        // Whole category disabled by a previous launch (renamed with .disabled).
+        Directory.CreateDirectory(Path.Combine(modDir, "Options", "Censorship.disabled", "Ryuji Shoes", "BASE.CPK"));
+
+        File.WriteAllText(Path.Combine(modDir, "Sewer56.Update.Metadata.json"), """
+        {
+          "Type": 0, "Version": "1.5.0",
+          "Hashes": {
+            "Files": [
+              { "RelativePath": "Options\\Censorship\\Ryuji Shoes\\BASE.CPK", "Hash": 1 }
+            ]
+          },
+          "IgnoreRegexes": [], "IncludeRegexes": [], "DeltaData": null
+        }
+        """);
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+        var mod = Assert.Single(result.Mods);
+
+        // The leaf is still discoverable under its canonical path so the user
+        // can re-enable it individually.
+        var leaf = Assert.Single(mod.Options);
+        Assert.Equal("Ryuji Shoes", leaf.Name);
+        Assert.Equal("Options/Censorship/Ryuji Shoes", leaf.RelativePath);
+        Assert.DoesNotContain(".disabled", leaf.Directory);
+    }
+
+    [Fact]
+    public void UpdateMetadataOnlyShowsOptionsPresentOnDisk()
     {
         using var temp = new TempDirectory();
         var modDir = temp.CreateMod("mods/MetaMod", "meta.options.mod");
 
-        // On disk, one two-level option is installed.
-        Directory.CreateDirectory(Path.Combine(modDir, "Options", "Category", "Existing Option"));
-        File.WriteAllText(Path.Combine(modDir, "Options", "Category", "Existing Option", "a.GMD"), "fake");
+        Directory.CreateDirectory(Path.Combine(modDir, "Options", "Category", "Existing Option", "BASE.CPK"));
 
-        // Release manifest lists two more two-level options that were never installed.
+        // Manifest also declares options that were never installed: they must not
+        // be fabricated as readable options.
         File.WriteAllText(Path.Combine(modDir, "Sewer56.Update.Metadata.json"), """
         {
           "ExtraData": null, "Type": 0, "Version": "1.5.0",
@@ -339,27 +448,18 @@ public class ModScannerTests
         var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
         var mod = Assert.Single(result.Mods);
 
-        Assert.Equal(3, mod.Options.Count);
-        Assert.Contains(mod.Options, o => o.Name == "Existing Option" && o.RelativePath == "Options/Category/Existing Option");
-
-        var missingA = mod.Options.Single(o => o.Name == "Missing Option A");
-        Assert.Equal("Options/Category/Missing Option A", missingA.RelativePath);
-        Assert.EndsWith(Path.Combine("Category", "Missing Option A"), missingA.Directory);
-        Assert.DoesNotContain(".disabled", missingA.Directory);
-
-        var missingB = mod.Options.Single(o => o.Name == "Missing Option B");
-        Assert.Equal("Options/Category/Missing Option B", missingB.RelativePath);
+        var option = Assert.Single(mod.Options);
+        Assert.Equal("Existing Option", option.Name);
+        Assert.Equal("Options/Category/Existing Option", option.RelativePath);
     }
 
     [Fact]
-    public void UpdateMetadataSingleLevelOptions()
+    public void UpdateMetadataOnlyShowsPresentSingleLevelOptions()
     {
         using var temp = new TempDirectory();
         var modDir = temp.CreateMod("mods/MetaModSingle", "meta.single.options.mod");
 
-        // One-level options: Options/<OptionName>/.
         Directory.CreateDirectory(Path.Combine(modDir, "Options", "Existing One"));
-        File.WriteAllText(Path.Combine(modDir, "Options", "Existing One", "x.dll"), "fake");
 
         File.WriteAllText(Path.Combine(modDir, "Sewer56.Update.Metadata.json"), """
         {
@@ -377,29 +477,8 @@ public class ModScannerTests
         var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
         var mod = Assert.Single(result.Mods);
 
-        Assert.Equal(2, mod.Options.Count);
-        Assert.Contains(mod.Options, o => o.Name == "Existing One");
-        Assert.Contains(mod.Options, o => o.Name == "Missing One" && o.RelativePath == "Options/Missing One");
-    }
-
-    [Fact]
-    public void DisabledGroupingFolderStillExposesLeaves()
-    {
-        using var temp = new TempDirectory();
-        var modDir = temp.CreateMod("mods/NestedOptions", "mod.nested.options");
-
-        var optionsDir = Path.Combine(modDir, "Options");
-        // Whole category disabled by a previous launch (renamed with .disabled).
-        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship.disabled", "Ryuji Shoes"));
-
-        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
-        var mod = Assert.Single(result.Mods);
-
-        // The leaf is still discoverable under its canonical path so the user
-        // can re-enable it individually.
-        var leaf = Assert.Single(mod.Options);
-        Assert.Equal("Ryuji Shoes", leaf.Name);
-        Assert.Equal("Options/Censorship/Ryuji Shoes", leaf.RelativePath);
-        Assert.DoesNotContain(".disabled", leaf.Directory);
+        var option = Assert.Single(mod.Options);
+        Assert.Equal("Existing One", option.Name);
+        Assert.Equal("Options/Existing One", option.RelativePath);
     }
 }

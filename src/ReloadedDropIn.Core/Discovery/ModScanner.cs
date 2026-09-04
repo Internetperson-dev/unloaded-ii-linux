@@ -20,10 +20,11 @@ public sealed class ModScanner
     public const string OptionsDirectoryName = "Options";
 
     /// <summary>
-    /// Reloaded-II's release manifest. Its Hashes.Files contain every path the mod
-    /// ships, including option folders that may not be present on disk yet (e.g.
-    /// optional content the user has not downloaded). We use it to surface the
-    /// full, authoritative option set even when the folder was never installed.
+    /// Reloaded-II's release manifest. Its Hashes.Files list every path the mod
+    /// ships, which lets us tell real option folders apart from stray content
+    /// folders that live inside the Options/ tree (e.g. BASE.CPK, FONT/,
+    /// BUSTUP/...). When present, the manifest is treated as the authoritative
+    /// option list and the on-disk scan is filtered down to those paths.
     /// </summary>
     public const string UpdateMetadataFileName = "Sewer56.Update.Metadata.json";
 
@@ -111,11 +112,12 @@ public sealed class ModScanner
 
     /// <summary>
     /// Scans for sub-module options inside a mod's Options/ directory.
-    /// The tree is walked recursively, so option folders nested several levels
-    /// deep (e.g. Options/Censorship/Ryuji Shoes/) are discovered. Grouping
-    /// folders that contain further subdirectories are not themselves exposed
-    /// as toggles — only the leaf folders that hold the actual content are.
-    /// Directories ending with .disabled are mapped back to their original name.
+    /// When the mod ships a Sewer56.Update.Metadata.json its layout (one-level
+    /// Options/&lt;option&gt; or two-level Options/&lt;category&gt;/&lt;option&gt;) is used to
+    /// expose exactly the declared option folders and drop stray content folders
+    /// (BASE.CPK, FONT/, ...). Without a manifest the classic one-level layout is
+    /// assumed and every direct child of Options/ is an option. Directories ending
+    /// with .disabled are mapped back to their original name at any depth.
     /// </summary>
     private IReadOnlyList<ModOption> ScanOptions(string modDirectory, List<ScanIssue> issues)
     {
@@ -124,29 +126,32 @@ public sealed class ModScanner
             return [];
 
         var options = new List<ModOption>();
-        ScanOptionDirectories(optionsDir, canonicalDirectory: optionsDir, optionsRoot: optionsDir, options, issues);
-        MergeUpdateMetadataOptions(modDirectory, optionsRoot: optionsDir, options);
+        var declared = ReadUpdateMetadataOptionPaths(modDirectory);
+
+        // A release manifest tells us exactly how the Options/ tree is laid out
+        // (one-level: Options/<option>, or two-level: Options/<category>/<option>),
+        // so options can be resolved at the declared depth and stray content
+        // folders can be dropped. Without a manifest we fall back to the classic
+        // one-level layout where every direct child of Options/ is an option.
+        var optionDepth = declared is null ? 1 : declared.Any(p => p[OptionsDirectoryName.Length + 1..].Contains('/')) ? 2 : 1;
+
+        ScanOptionLevel(optionsDir, canonicalDirectory: optionsDir, optionsRoot: optionsDir,
+            depth: 0, optionDepth: optionDepth, declared: declared, options: options, issues: issues);
+
         return options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>
-    /// Adds option folders declared in Sewer56.Update.Metadata.json that are
-    /// not present on disk, so the overlay shows the mod's full option set
-    /// (e.g. optional content the user has not downloaded yet). Folders already
-    /// discovered on disk are left untouched; the metadata only supplements.
-    ///
-    /// The option granularity mirrors the on-disk scan: when the mod already
-    /// has two-level options (Options/&lt;category&gt;/&lt;option&gt;/) the metadata is
-    /// read the same way; otherwise one-level options are assumed.
+    /// Reads the set of option paths declared in Sewer56.Update.Metadata.json, or
+    /// null when the mod has no (readable) manifest. Option granularity mirrors the
+    /// mod's own layout: when an option path nests further (Options/Category/Option)
+    /// the first two segments form the option; otherwise the first segment does.
     /// </summary>
-    private void MergeUpdateMetadataOptions(string modDirectory, string optionsRoot, List<ModOption> options)
+    private static HashSet<string>? ReadUpdateMetadataOptionPaths(string modDirectory)
     {
-        if (options.Count == 0)
-            return;
-
         var metadataPath = Path.Combine(modDirectory, UpdateMetadataFileName);
         if (!File.Exists(metadataPath))
-            return;
+            return null;
 
         List<string> filePaths;
         try
@@ -155,18 +160,18 @@ public sealed class ModScanner
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            return;
+            return null;
         }
 
         if (filePaths.Count == 0)
-            return;
+            return null;
 
-        var twoLevel = options.Any(o => o.RelativePath.StartsWith("Options/", StringComparison.Ordinal)
-            && o.RelativePath["Options/".Length..].Contains('/'));
+        const string optionsPrefix = OptionsDirectoryName + "/";
+        var twoLevel = filePaths.Any(p =>
+            p.Replace('\\', '/').StartsWith(optionsPrefix, StringComparison.OrdinalIgnoreCase) &&
+            p.Replace('\\', '/')[optionsPrefix.Length..].Contains('/'));
 
-        var existing = new HashSet<string>(options.Select(o => o.RelativePath), StringComparer.OrdinalIgnoreCase);
-        const string optionsPrefix = "Options/";
-
+        var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var relative in filePaths)
         {
             var normalized = relative.Replace('\\', '/');
@@ -174,23 +179,17 @@ public sealed class ModScanner
                 continue;
 
             var segments = normalized[optionsPrefix.Length..].Split('/');
-            var candidate = twoLevel
+            if (segments.Length == 0)
+                continue;
+
+            var optionPath = twoLevel
                 ? segments.Length >= 2 ? string.Join('/', segments.Take(2)) : null
                 : segments.Length >= 1 ? segments[0] : null;
-            if (candidate is null)
-                continue;
-
-            var relativePath = optionsPrefix + candidate;
-            if (!existing.Add(relativePath))
-                continue;
-
-            options.Add(new ModOption
-            {
-                Name = candidate.Split('/')[^1],
-                Directory = Path.Combine(optionsRoot, candidate),
-                RelativePath = relativePath,
-            });
+            if (optionPath is not null)
+                declared.Add(optionsPrefix + optionPath);
         }
+
+        return declared;
     }
 
     private static List<string> ReadUpdateMetadataFilePaths(string path)
@@ -212,10 +211,13 @@ public sealed class ModScanner
         return result;
     }
 
-    private void ScanOptionDirectories(
+    private void ScanOptionLevel(
         string directory,
         string canonicalDirectory,
         string optionsRoot,
+        int depth,
+        int optionDepth,
+        HashSet<string>? declared,
         List<ModOption> options,
         List<ScanIssue> issues)
     {
@@ -240,32 +242,27 @@ public sealed class ModScanner
             // doesn't leak the suffix into the logical option path.
             var canonicalPath = Path.Combine(canonicalDirectory, name);
 
-            // Recurse first so nested option folders are discovered regardless
-            // of whether this directory is itself exposed as a toggle. Use the
-            // on-disk path so a .disabled parent is still explored.
-            ScanOptionDirectories(subdir, canonicalPath, optionsRoot, options, issues);
+            if (depth + 1 >= optionDepth)
+            {
+                // At the option level. Everything nested below (BASE.CPK, FONT/,
+                // BUSTUP/...) is a mod's internal layout, not more options.
+                var relativePath = $"{OptionsDirectoryName}/{Path.GetRelativePath(optionsRoot, canonicalPath).Replace(Path.DirectorySeparatorChar, '/')}";
+                if (declared is null || declared.Contains(relativePath))
+                {
+                    options.Add(new ModOption
+                    {
+                        Name = name,
+                        Directory = canonicalPath,
+                        RelativePath = relativePath,
+                    });
+                }
 
-            // Grouping folders (contain further subdirectories) are not toggles.
-            bool hasChildren;
-            try
-            {
-                hasChildren = Directory.EnumerateDirectories(subdir).Any();
-            }
-            catch (IOException)
-            {
                 continue;
             }
 
-            if (hasChildren)
-                continue;
-
-            var relativePath = Path.GetRelativePath(optionsRoot, canonicalPath);
-            options.Add(new ModOption
-            {
-                Name = name,
-                Directory = canonicalPath,
-                RelativePath = Path.Combine(OptionsDirectoryName, relativePath),
-            });
+            // Still above the option level: grouping folders are recursed into,
+            // using the on-disk path so a .disabled parent is still explored.
+            ScanOptionLevel(subdir, canonicalPath, optionsRoot, depth + 1, optionDepth, declared, options, issues);
         }
     }
 
