@@ -99,19 +99,19 @@ public sealed class ModScanner
                 }
                 else
                 {
-                    // 1. Scan Options/ folder options (Directory-based multi-option mods)
+                    // 1. Scan Options/ folder options
                     var options = ScanOptions(subdirectory, issues);
 
-                    // 2. Scan direct sub-module folders (e.g., texturefixesproject sub-mods)
+                    // 2. Scan direct content sub-module folders
                     var contentSubs = ScanContentSubModules(subdirectory, issues);
 
-                    // 3. Extract JSON/C# configurable options directly declared in ModConfig.json
+                    // 3. Extract JSON/C# configurable options directly from ModConfig.json
                     var configOptions = ScanModConfigOptions(manifestText, subdirectory);
 
                     var allOptions = options
                         .Concat(contentSubs)
                         .Concat(configOptions)
-                        .DistinctBy(o => o.RelativePath, StringComparer.OrdinalIgnoreCase)
+                        .DistinctBy(o => o.Directory, StringComparer.OrdinalIgnoreCase)
                         .ToList();
 
                     mods.Add(new DiscoveredMod 
@@ -153,7 +153,7 @@ public sealed class ModScanner
                         result.Add(new ModOption
                         {
                             Name = name,
-                            Directory = modDirectory,
+                            Directory = Path.Combine(modDirectory, ".config", id),
                             RelativePath = $"config:{id}"
                         });
                     }
@@ -213,7 +213,7 @@ public sealed class ModScanner
             if (!normalized.StartsWith(optionsPrefix, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            var segmentCount = normalized[optionsPrefix.Length..].Split('/').Length;
+            var segmentCount = normalized[optionsPrefix.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries).Length;
             maxSegments = Math.Max(maxSegments, segmentCount);
         }
 
@@ -226,7 +226,7 @@ public sealed class ModScanner
             if (!normalized.StartsWith(optionsPrefix, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            var segments = normalized[optionsPrefix.Length..].Split('/');
+            var segments = normalized[optionsPrefix.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries);
             if (segments.Length < optionDepth)
                 continue;
 
@@ -284,7 +284,9 @@ public sealed class ModScanner
 
             if (depth + 1 >= optionDepth)
             {
-                var relativePath = $"{OptionsDirectoryName}/{Path.GetRelativePath(optionsRoot, canonicalPath).Replace(Path.DirectorySeparatorChar, '/')}";
+                var relFromRoot = Path.GetRelativePath(optionsRoot, canonicalPath).Replace(Path.DirectorySeparatorChar, '/');
+                var relativePath = $"{OptionsDirectoryName}/{relFromRoot}";
+
                 if (declared is null || declared.Contains(relativePath))
                 {
                     options.Add(new ModOption
@@ -302,9 +304,6 @@ public sealed class ModScanner
         }
     }
 
-    /// <summary>
-    /// Detects content subdirectories at the mod's root level (e.g. texture pack folders).
-    /// </summary>
     private IReadOnlyList<ModOption> ScanContentSubModules(string modDirectory, List<ScanIssue> issues)
     {
         var options = new List<ModOption>();
@@ -323,7 +322,6 @@ public sealed class ModScanner
             var rawName = Path.GetFileName(subdir);
             var (name, canonicalPath) = NormalizeDisabledDirectory(rawName, subdir);
 
-            // Ignore system folders, build artifacts, and non-content outputs
             if (name.Equals(OptionsDirectoryName, StringComparison.OrdinalIgnoreCase) ||
                 name.Equals("Cache", StringComparison.OrdinalIgnoreCase) ||
                 name.Equals("x86", StringComparison.OrdinalIgnoreCase) ||
@@ -338,11 +336,9 @@ public sealed class ModScanner
 
             var diskPath = subdir;
 
-            // Skip nested mods (they have their own ModConfig.json)
             if (File.Exists(Path.Combine(diskPath, ModManifest.FileName)))
                 continue;
 
-            // Skip binary dynamic libraries
             bool hasDlls;
             try
             {
