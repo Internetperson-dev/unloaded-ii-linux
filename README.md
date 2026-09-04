@@ -1,6 +1,6 @@
 # Unloaded-II (Reloaded Drop-In)
 
-This AI-coded fork of Unloaded-II add a mod menu that can be opened with Insert. You can pick what mods to enable and which options to enable with a restart.  
+This AI-coded fork of Unloaded-II adds enabling and disabling mods and mod options in the mod menu that can be opened with Insert.
 
 A "Intro Skip" option from [p5rpc.modloader](https://github.com/Sewer56/p5rpc.modloader/blob/db4ee5efe6e3226600be13c5697306f721d386fa/p5rpc.modloader/Patches/P5R/SkipIntro.cs#L9) is also added.
 
