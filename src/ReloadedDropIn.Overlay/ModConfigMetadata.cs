@@ -20,12 +20,6 @@ internal static class ModConfigMetadata
     private const string DisplayAttributeName =
         "System.ComponentModel.DataAnnotations.DisplayAttribute";
 
-    private const string DisplayNameAttributeName =
-        "System.ComponentModel.DisplayNameAttribute";
-
-    private const string DefaultValueAttributeName =
-        "System.ComponentModel.DefaultValueAttribute";
-
     private const string JsonPropertyNameAttributeName =
         "System.Text.Json.Serialization.JsonPropertyNameAttribute";
 
@@ -74,19 +68,14 @@ internal static class ModConfigMetadata
 
     private static JsonObject? ReadDefaultConfigCore(string dllPath)
     {
-        // Resolve against the mod folder (template assemblies, dependencies) and
-        // the running runtime. Only metadata is read; nothing is executed.
         var paths = new List<string> { dllPath };
-        paths.AddRange(Directory.GetFiles(Path.GetDirectoryName(dllPath)!, "*.dll"));
         paths.AddRange(Directory.GetFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll"));
 
         using var mlc = new MetadataLoadContext(new PathAssemblyResolver(paths));
         var assembly = mlc.LoadFromAssemblyPath(dllPath);
 
-        // Find the config class: inherits from Configurable<T> (the Reloaded-II
-        // template pattern). The base type can live in the template assembly or
-        // the mod's own copy (e.g. p5rpc.modloader ships a Template copy), so
-        // match on the generic type name rather than the full namespace.
+        // Find the config class: inherits from Configurable<T> (Reloaded-II template pattern).
+        // The base class is typically `Reloaded.Mod.Template.Configuration.Configurable<T>`.
         Type? configType = null;
         foreach (var type in GetLoadableTypes(assembly))
         {
@@ -95,7 +84,9 @@ internal static class ModConfigMetadata
                 var baseType = type.BaseType;
                 while (baseType is not null)
                 {
-                    if (baseType.IsGenericType && baseType.GetGenericTypeDefinition().Name == "Configurable`1")
+                    if (baseType.IsGenericType &&
+                        baseType.GetGenericTypeDefinition().FullName?
+                            .StartsWith("Reloaded.Mod.Template.Configuration.Configurable") == true)
                     {
                         configType = type;
                         break;
@@ -112,12 +103,24 @@ internal static class ModConfigMetadata
         if (configType is null)
             return null;
 
-        // No instantiation: MetadataLoadContext types can't be constructed, so
-        // defaults come from [DefaultValue] metadata and type defaults.
-        return BuildJsonObject(configType);
+        // Instantiate via parameterless constructor to get defaults.
+        object? instance;
+        try
+        {
+            instance = Activator.CreateInstance(configType);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (instance is null)
+            return null;
+
+        return BuildJsonObject(configType, instance);
     }
 
-    private static JsonObject BuildJsonObject(Type type)
+    private static JsonObject BuildJsonObject(Type type, object instance)
     {
         var obj = new JsonObject();
 
@@ -128,22 +131,48 @@ internal static class ModConfigMetadata
 
             try
             {
+                var value = property.GetValue(instance);
                 var jsonKey = ReadJsonPropertyName(property) ?? property.Name;
+
+                if (value is null)
+                    continue;
+
                 var propType = property.PropertyType;
 
                 // Handle nested config objects (e.g. ConfigCommon, ConfigP5R).
                 if (propType.IsClass && propType != typeof(string) && !propType.IsArray)
                 {
-                    var nested = BuildJsonObject(propType);
+                    var nested = BuildJsonObject(propType, value);
                     if (nested.Count > 0)
                         obj[jsonKey] = nested;
                 }
-                else
+                else if (propType == typeof(bool))
                 {
-                    var value = ReadDefaultValue(property) ?? GetTypeDefault(propType);
-                    var node = SerializeValue(propType, value);
-                    if (node is not null)
-                        obj[jsonKey] = node;
+                    obj[jsonKey] = (bool)value;
+                }
+                else if (propType == typeof(int))
+                {
+                    obj[jsonKey] = (long)(int)value;
+                }
+                else if (propType == typeof(long))
+                {
+                    obj[jsonKey] = (long)value;
+                }
+                else if (propType == typeof(float))
+                {
+                    obj[jsonKey] = (double)(float)value;
+                }
+                else if (propType == typeof(double))
+                {
+                    obj[jsonKey] = (double)value;
+                }
+                else if (propType == typeof(string))
+                {
+                    obj[jsonKey] = (string)value;
+                }
+                else if (propType.IsEnum)
+                {
+                    obj[jsonKey] = value.ToString() ?? "";
                 }
             }
             catch
@@ -155,63 +184,12 @@ internal static class ModConfigMetadata
         return obj;
     }
 
-    /// <summary>Reads [DefaultValue(...)] from a property, if present.</summary>
-    private static object? ReadDefaultValue(PropertyInfo property)
-    {
-        foreach (var attribute in property.GetCustomAttributesData())
-        {
-            if (!TryGetFullName(attribute, out var fullName) || fullName != DefaultValueAttributeName)
-                continue;
-
-            if (attribute.ConstructorArguments.Count > 0)
-                return attribute.ConstructorArguments[0].Value;
-        }
-
-        return null;
-    }
-
-    /// <summary>Fallback default for a config scalar when no [DefaultValue] exists.</summary>
-    private static object? GetTypeDefault(Type type)
-    {
-        if (type == typeof(bool))
-            return false;
-        if (type == typeof(int))
-            return 0;
-        if (type == typeof(long))
-            return 0L;
-        if (type == typeof(float))
-            return 0f;
-        if (type == typeof(double))
-            return 0d;
-        if (type == typeof(string))
-            return string.Empty;
-        if (type.IsEnum)
-        {
-            var fields = type.GetFields(BindingFlags.Public | BindingFlags.Static);
-            return fields.FirstOrDefault()?.Name;
-        }
-
-        return null;
-    }
-
-    private static JsonNode? SerializeValue(Type propType, object? value)
-    {
-        if (propType == typeof(string))
-            return JsonValue.Create((string)(value ?? string.Empty));
-        if (propType.IsEnum)
-            return JsonValue.Create(value?.ToString() ?? string.Empty);
-        var validValue = value ?? GetTypeDefault(propType);
-        return validValue is null ? null : JsonValue.Create(validValue);
-    }
-
     private static IReadOnlyDictionary<string, string> ReadDisplayNamesCore(string dllPath)
     {
-        // Resolve framework attribute types (DisplayAttribute, DisplayNameAttribute,
-        // JsonPropertyNameAttribute) from the running runtime, plus the mod's own
-        // DLLs so nested config types and template assemblies resolve. Only
-        // attribute metadata is read, never executed.
+        // Resolve framework attribute types (DisplayAttribute, JsonPropertyNameAttribute)
+        // from the running runtime, plus the mod DLL itself. The mod's own dependencies are
+        // intentionally not required - only attribute metadata is read.
         var paths = new List<string> { dllPath };
-        paths.AddRange(Directory.GetFiles(Path.GetDirectoryName(dllPath)!, "*.dll"));
         paths.AddRange(Directory.GetFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll"));
 
         using var mlc = new MetadataLoadContext(new PathAssemblyResolver(paths));
@@ -271,31 +249,16 @@ internal static class ModConfigMetadata
     {
         foreach (var attribute in property.GetCustomAttributesData())
         {
-            if (!TryGetFullName(attribute, out var fullName))
+            if (!TryGetFullName(attribute, out var fullName) || fullName != DisplayAttributeName)
                 continue;
 
-            if (fullName == DisplayNameAttributeName)
+            foreach (var named in attribute.NamedArguments)
             {
-                // System.ComponentModel.DisplayNameAttribute: the name is a ctor arg.
-                if (attribute.ConstructorArguments.Count > 0 &&
-                    attribute.ConstructorArguments[0].Value is string constructorName &&
-                    !string.IsNullOrWhiteSpace(constructorName))
+                if (named.MemberName == "Name" &&
+                    named.TypedValue.Value is string name &&
+                    !string.IsNullOrWhiteSpace(name))
                 {
-                    return constructorName;
-                }
-            }
-            else if (fullName == DisplayAttributeName)
-            {
-                // System.ComponentModel.DataAnnotations.DisplayAttribute: Name is
-                // supplied as a named argument.
-                foreach (var named in attribute.NamedArguments)
-                {
-                    if (named.MemberName == "Name" &&
-                        named.TypedValue.Value is string name &&
-                        !string.IsNullOrWhiteSpace(name))
-                    {
-                        return name;
-                    }
+                    return name;
                 }
             }
         }

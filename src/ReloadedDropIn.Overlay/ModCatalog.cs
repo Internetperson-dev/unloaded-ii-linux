@@ -80,90 +80,75 @@ public sealed class ModCatalog(string gameDirectory)
         HideWatermark = overrides.HideWatermark;
         DropInVersion = ReadDropInVersion();
         ReadUpdateCheck();
-
         var scan = new ModScanner().Scan(ModsDirectory);
 
-        // Required base mods (shipped under mods/_base-mods/) aren't toggleable,
-        // but they expose config options in the Reloaded-II options menu (e.g.
-        // p5rpc.modloader's "Intro Skip"). They are listed as non-toggleable
-        // entries in the "Base mods" section with their config editor available.
         foreach (var mod in scan.Mods)
         {
+            // Library mods aren't user-facing; hide them like the Reloaded launcher does.
+            if (mod.Manifest.IsLibrary)
+                continue;
+
+            var configPath = Path.Combine(UserConfigRoot, mod.ModId, "Config.json");
             var separator = Path.DirectorySeparatorChar;
-            var isBaseMod = mod.Directory.Contains($"{separator}_base-mods{separator}", StringComparison.OrdinalIgnoreCase);
-            AddMod(mod, isBaseMod, overrides);
+
+            // Build options list with enabled state from overrides.
+            var options = mod.Options.Select(o => new CatalogModOption
+            {
+                Name = o.Name,
+                Directory = o.Directory,
+                RelativePath = o.RelativePath,
+                Enabled = !overrides.IsOptionDisabled(mod.ModId, o.RelativePath),
+            }).ToList();
+
+            var modDllPath = string.IsNullOrWhiteSpace(mod.Manifest.ModDll)
+                ? null
+                : Path.Combine(mod.Directory, mod.Manifest.ModDll);
+
+            // Load config: user config first, then mod-shipped Config.json,
+            // then extract defaults from the DLL's [Configurable] class.
+            var userConfig = TryLoadConfig(configPath)
+                ?? TryLoadConfig(Path.Combine(mod.Directory, "Config.json"));
+
+            if (userConfig is null && modDllPath is not null)
+            {
+                try
+                {
+                    var dllConfig = ModConfigMetadata.ReadDefaultConfig(modDllPath);
+                    if (dllConfig is not null && dllConfig.Count > 0)
+                    {
+                        userConfig = dllConfig;
+                        // Persist the seeded config so future reads don't need the DLL.
+                        try
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+                            File.WriteAllText(configPath,
+                                dllConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                        }
+                        catch { /* best-effort */ }
+                    }
+                }
+                catch { /* DLL inspection can fail on arch mismatch etc. — skip silently. */ }
+            }
+
+            Mods.Add(new CatalogMod
+            {
+                ModId = mod.ModId,
+                Name = string.IsNullOrWhiteSpace(mod.Manifest.ModName) ? mod.ModId : mod.Manifest.ModName,
+                Version = mod.Manifest.ModVersion,
+                Directory = mod.Directory,
+                IsBaseMod = mod.Directory.Contains($"{separator}_base-mods{separator}", StringComparison.OrdinalIgnoreCase),
+                Enabled = !overrides.IsDisabled(mod.ModId),
+                UserConfigPath = configPath,
+                UserConfig = userConfig,
+                ConfigDisplayNames = ModConfigMetadata.ReadDisplayNames(modDllPath),
+                Options = options,
+            });
         }
 
         // User mods first, base mods at the bottom.
         Mods.Sort((a, b) => a.IsBaseMod != b.IsBaseMod
             ? a.IsBaseMod.CompareTo(b.IsBaseMod)
             : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private void AddMod(DiscoveredMod mod, bool isBaseMod, OverlayOverrides overrides)
-    {
-        // A mod may be present as both a user mod and a base mod; the user copy wins.
-        if (Mods.Any(m => m.ModId.Equals(mod.ModId, StringComparison.OrdinalIgnoreCase)))
-            return;
-
-        // Library mods aren't user-facing; hide them like the Reloaded launcher does.
-        if (mod.Manifest.IsLibrary)
-            return;
-
-        var configPath = Path.Combine(UserConfigRoot, mod.ModId, "Config.json");
-
-        // Build options list with enabled state from overrides.
-        var options = mod.Options.Select(o => new CatalogModOption
-        {
-            Name = o.Name,
-            Directory = o.Directory,
-            RelativePath = o.RelativePath,
-            Enabled = !overrides.IsOptionDisabled(mod.ModId, o.RelativePath),
-        }).ToList();
-
-        var modDllPath = string.IsNullOrWhiteSpace(mod.Manifest.ModDll)
-            ? null
-            : Path.Combine(mod.Directory, mod.Manifest.ModDll);
-
-        // Load config: user config first, then mod-shipped Config.json,
-        // then extract defaults from the DLL's [Configurable] class.
-        var userConfig = TryLoadConfig(configPath)
-            ?? TryLoadConfig(Path.Combine(mod.Directory, "Config.json"));
-
-        if (userConfig is null && modDllPath is not null)
-        {
-            try
-            {
-                var dllConfig = ModConfigMetadata.ReadDefaultConfig(modDllPath);
-                if (dllConfig is not null && dllConfig.Count > 0)
-                {
-                    userConfig = dllConfig;
-                    // Persist the seeded config so future reads don't need the DLL.
-                    try
-                    {
-                        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-                        File.WriteAllText(configPath,
-                            dllConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-                    }
-                    catch { /* best-effort */ }
-                }
-            }
-            catch { /* DLL inspection can fail on arch mismatch etc. — skip silently. */ }
-        }
-
-        Mods.Add(new CatalogMod
-        {
-            ModId = mod.ModId,
-            Name = string.IsNullOrWhiteSpace(mod.Manifest.ModName) ? mod.ModId : mod.Manifest.ModName,
-            Version = mod.Manifest.ModVersion,
-            Directory = mod.Directory,
-            IsBaseMod = isBaseMod,
-            Enabled = !overrides.IsDisabled(mod.ModId),
-            UserConfigPath = configPath,
-            UserConfig = userConfig,
-            ConfigDisplayNames = ModConfigMetadata.ReadDisplayNames(modDllPath),
-            Options = options,
-        });
     }
 
     /// <summary>Persists current toggle states to the overrides file sync reads.</summary>
