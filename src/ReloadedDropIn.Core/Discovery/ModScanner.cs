@@ -110,7 +110,7 @@ public sealed class ModScanner
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    issues.Add(new ScanIssue(ScanIssueKind.InvalidManifest, manifestPath, `Failed to read manifest: {ex.Message}`));
+                    issues.Add(new ScanIssue(ScanIssueKind.InvalidManifest, manifestPath, $"Failed to read manifest: {ex.Message}"));
                     goto Recurse;
                 }
 
@@ -226,8 +226,6 @@ public sealed class ModScanner
             maxSegments = Math.Max(maxSegments, segmentCount);
         }
 
-        // If files are nested deeply under options, establish optionDepth based on typical structure.
-        // E.g. Options/Category/OptionName/file.txt -> optionDepth = 2
         var optionDepth = maxSegments >= 3 ? 2 : 1;
 
         var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -293,12 +291,8 @@ public sealed class ModScanner
             var (name, _) = NormalizeDisabledDirectory(rawName, subdir);
             var canonicalPath = Path.Combine(canonicalDirectory, name);
 
-            // Check whether this directory is an option leaf or an intermediate grouping folder.
-            // An option leaf is reached when we hit optionDepth, or if it contains files/folders that act as mod contents (e.g. .CPK, .BIN, asset folders, etc.)
-            // Or if further recursion yields no more sub-options.
             bool isOptionLevel = (depth + 1 >= optionDepth);
 
-            // Additional heuristic check: if it doesn't contain sub-directories that look like options, or contains content files directly
             if (!isOptionLevel)
             {
                 try
