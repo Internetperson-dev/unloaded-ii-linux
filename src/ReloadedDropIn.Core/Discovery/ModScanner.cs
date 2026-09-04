@@ -34,10 +34,17 @@ public sealed class ModScanner
         if (!Directory.Exists(modsDirectory))
             return new ScanResult { Mods = [], Issues = [] };
 
-        foreach (var file in Directory.EnumerateFiles(modsDirectory))
+        try
         {
-            if (!Path.GetFileName(file).Equals("PUT_MODS_HERE.txt", StringComparison.OrdinalIgnoreCase))
-                issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, file, "loose file in mods/ (mods must be extracted folders)"));
+            foreach (var file in Directory.EnumerateFiles(modsDirectory))
+            {
+                if (!Path.GetFileName(file).Equals("PUT_MODS_HERE.txt", StringComparison.OrdinalIgnoreCase))
+                    issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, file, "loose file in mods/ (mods must be extracted folders)"));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, modsDirectory, "could not enumerate root directory files"));
         }
 
         ScanDirectory(modsDirectory, depth: 0, mods, issues);
@@ -80,9 +87,9 @@ public sealed class ModScanner
         {
             subdirectories = Directory.EnumerateDirectories(directory);
         }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
         {
-            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, directory, "permission denied"));
+            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, directory, "permission denied or I/O error"));
             return;
         }
 
@@ -91,7 +98,18 @@ public sealed class ModScanner
             var manifestPath = Path.Combine(subdirectory, ModManifest.FileName);
             if (File.Exists(manifestPath))
             {
-                var manifestText = File.ReadAllText(manifestPath);
+                string manifestText;
+                try
+                {
+                    // Catch locked files preventing game startup crash
+                    manifestText = File.ReadAllText(manifestPath);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    issues.Add(new ScanIssue(ScanIssueKind.InvalidManifest, manifestPath, $"Failed to read manifest: {ex.Message}"));
+                    goto Recurse;
+                }
+
                 var manifest = ModManifest.TryParse(manifestText, out var error);
                 if (manifest is null)
                 {
@@ -111,7 +129,7 @@ public sealed class ModScanner
                     var allOptions = options
                         .Concat(contentSubs)
                         .Concat(configOptions)
-                        .DistinctBy(o => o.Directory, StringComparer.OrdinalIgnoreCase)
+                        .DistinctBy(o => o.RelativePath, StringComparer.OrdinalIgnoreCase) // Deduplicate by relative logical path
                         .ToList();
 
                     mods.Add(new DiscoveredMod 
@@ -123,6 +141,7 @@ public sealed class ModScanner
                 }
             }
 
+        Recurse:
             // Always recurse: some mods contain nested mods in subdirectories
             // (e.g. texturefixesproject has sub-mods with their own ModConfig.json).
             ScanDirectory(subdirectory, depth + 1, mods, issues);
@@ -270,9 +289,9 @@ public sealed class ModScanner
         {
             subdirectories = Directory.EnumerateDirectories(directory);
         }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
         {
-            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, directory, "permission denied reading Options/"));
+            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, directory, "permission denied or I/O error reading Options/"));
             return;
         }
 
@@ -284,16 +303,20 @@ public sealed class ModScanner
 
             if (depth + 1 >= optionDepth)
             {
-                var relFromRoot = Path.GetRelativePath(optionsRoot, canonicalPath).Replace(Path.DirectorySeparatorChar, '/');
-                var relativePath = $"{OptionsDirectoryName}/{relFromRoot}";
+                var relFromRoot = Path.GetRelativePath(optionsRoot, canonicalPath);
+                
+                // Construct the check path using standard forward slashes to match the JSON read above
+                var checkPath = $"{OptionsDirectoryName}/{relFromRoot.Replace(Path.DirectorySeparatorChar, '/')}";
 
-                if (declared is null || declared.Contains(relativePath))
+                if (declared is null || declared.Contains(checkPath))
                 {
                     options.Add(new ModOption
                     {
                         Name = name,
                         Directory = canonicalPath,
-                        RelativePath = relativePath,
+                        // Fix for Game Crash: Native C/C++ game loaders expect OS-native directory separators,
+                        // so we MUST use Path.Combine here instead of hardcoding a `/` string.
+                        RelativePath = Path.Combine(OptionsDirectoryName, relFromRoot),
                     });
                 }
 
@@ -312,7 +335,7 @@ public sealed class ModScanner
         {
             subdirectories = Directory.EnumerateDirectories(modDirectory);
         }
-        catch (UnauthorizedAccessException)
+        catch (Exception)
         {
             return [];
         }
@@ -344,7 +367,7 @@ public sealed class ModScanner
             {
                 hasDlls = Directory.EnumerateFiles(diskPath, "*.dll").Any();
             }
-            catch (IOException)
+            catch (Exception) // Hardened generic catch block preventing unhandled VFS locks here
             {
                 continue;
             }
