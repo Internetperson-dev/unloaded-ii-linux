@@ -83,7 +83,7 @@ public sealed class ModCatalog(string gameDirectory)
 
         // Ensure Skip Intro defaults to OFF (disabled) for p5rpc.modloader
         // if no override exists yet and no user config has been created.
-        EnsureP5RModLoaderSkipIntroDefault(overrides, out var overridesChanged);
+        overrides = EnsureP5RModLoaderSkipIntroDefault(overrides, out var overridesChanged);
         if (overridesChanged)
             overrides.Save(DropInDirectory);
 
@@ -189,28 +189,31 @@ public sealed class ModCatalog(string gameDirectory)
     private const string P5RModLoaderId = "p5rpc.modloader";
     private const string SkipIntroOptionRelativePath = "__builtin/skip-intro";
 
-    private void EnsureP5RModLoaderSkipIntroDefault(OverlayOverrides overrides, out bool changed)
+    private OverlayOverrides EnsureP5RModLoaderSkipIntroDefault(OverlayOverrides overrides, out bool changed)
     {
         changed = false;
         var configPath = Path.Combine(UserConfigRoot, P5RModLoaderId, "Config.json");
 
         // If user config already exists, respect it (don't override user's choice)
         if (File.Exists(configPath))
-            return;
+            return overrides;
 
         // If override already exists for this option, respect it
         if (overrides.IsOptionDisabled(P5RModLoaderId, SkipIntroOptionRelativePath))
-            return;
+            return overrides;
 
-        // Default to disabled (OFF) - add to overrides
+        // Default to disabled (OFF) - create new overrides with the option added
         var disabledOptions = overrides.DisabledOptions.ToList();
         var key = $"{P5RModLoaderId}:{SkipIntroOptionRelativePath}";
         if (!disabledOptions.Contains(key, StringComparer.OrdinalIgnoreCase))
         {
             disabledOptions.Add(key);
-            overrides.DisabledOptions = [.. disabledOptions];
+            // Use 'with' expression to create new record with modified DisabledOptions
+            overrides = overrides with { DisabledOptions = [.. disabledOptions] };
             changed = true;
         }
+
+        return overrides;
     }
 
     /// <summary>Persists current toggle states to the overrides file sync reads.</summary>
