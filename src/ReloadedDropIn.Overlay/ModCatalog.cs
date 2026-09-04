@@ -100,6 +100,32 @@ public sealed class ModCatalog(string gameDirectory)
                 Enabled = !overrides.IsOptionDisabled(mod.ModId, o.RelativePath),
             }).ToList();
 
+            var modDllPath = string.IsNullOrWhiteSpace(mod.Manifest.ModDll)
+                ? null
+                : Path.Combine(mod.Directory, mod.Manifest.ModDll);
+
+            // Load config: user config first, then mod-shipped Config.json,
+            // then extract defaults from the DLL's [Configurable] class.
+            var userConfig = TryLoadConfig(configPath)
+                ?? TryLoadConfig(Path.Combine(mod.Directory, "Config.json"));
+
+            if (userConfig is null && modDllPath is not null)
+            {
+                var dllConfig = ModConfigMetadata.ReadDefaultConfig(modDllPath);
+                if (dllConfig is not null && dllConfig.Count > 0)
+                {
+                    userConfig = dllConfig;
+                    // Persist the seeded config so future reads don't need the DLL.
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+                        File.WriteAllText(configPath,
+                            dllConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                    }
+                    catch { /* best-effort */ }
+                }
+            }
+
             Mods.Add(new CatalogMod
             {
                 ModId = mod.ModId,
@@ -109,12 +135,8 @@ public sealed class ModCatalog(string gameDirectory)
                 IsBaseMod = mod.Directory.Contains($"{separator}_base-mods{separator}", StringComparison.OrdinalIgnoreCase),
                 Enabled = !overrides.IsDisabled(mod.ModId),
                 UserConfigPath = configPath,
-                UserConfig = TryLoadConfig(configPath)
-                    ?? TryLoadConfig(Path.Combine(mod.Directory, "Config.json")),
-                ConfigDisplayNames = ModConfigMetadata.ReadDisplayNames(
-                    string.IsNullOrWhiteSpace(mod.Manifest.ModDll)
-                        ? null
-                        : Path.Combine(mod.Directory, mod.Manifest.ModDll)),
+                UserConfig = userConfig,
+                ConfigDisplayNames = ModConfigMetadata.ReadDisplayNames(modDllPath),
                 Options = options,
             });
         }

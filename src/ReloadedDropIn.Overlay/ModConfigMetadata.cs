@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ReloadedDropIn.Overlay;
 
@@ -20,6 +22,9 @@ internal static class ModConfigMetadata
 
     private const string JsonPropertyNameAttributeName =
         "System.Text.Json.Serialization.JsonPropertyNameAttribute";
+
+    private const string ConfigurableAttributeName =
+        "Reloaded.Mod.Template.Configuration.ConfigurableAttribute";
 
     private static readonly IReadOnlyDictionary<string, string> Empty =
         new Dictionary<string, string>();
@@ -42,6 +47,134 @@ internal static class ModConfigMetadata
             // Best-effort: the overlay falls back to raw JSON keys.
             return Empty;
         }
+    }
+
+    /// <summary>
+    /// Reads a mod DLL's [Configurable] class and produces a default JsonObject
+    /// with all config properties and their default values. Returns null when the
+    /// DLL is missing, unreadable, or declares no [Configurable] class.
+    /// </summary>
+    public static JsonObject? ReadDefaultConfig(string? dllPath)
+    {
+        if (string.IsNullOrWhiteSpace(dllPath) || !File.Exists(dllPath))
+            return null;
+
+        try
+        {
+            return ReadDefaultConfigCore(dllPath);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static JsonObject? ReadDefaultConfigCore(string dllPath)
+    {
+        var paths = new List<string> { dllPath };
+        paths.AddRange(Directory.GetFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll"));
+
+        using var mlc = new MetadataLoadContext(new PathAssemblyResolver(paths));
+        var assembly = mlc.LoadFromAssemblyPath(dllPath);
+
+        // Find the [Configurable] class (e.g. Config : Configurable<Config>).
+        Type? configType = null;
+        foreach (var type in GetLoadableTypes(assembly))
+        {
+            try
+            {
+                if (type.GetCustomAttributesData().Any(a =>
+                    TryGetFullName(a, out var name) && name == ConfigurableAttributeName))
+                {
+                    configType = type;
+                    break;
+                }
+            }
+            catch { }
+        }
+
+        if (configType is null)
+            return null;
+
+        // Instantiate via parameterless constructor to get defaults.
+        object? instance;
+        try
+        {
+            instance = Activator.CreateInstance(configType);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (instance is null)
+            return null;
+
+        return BuildJsonObject(configType, instance);
+    }
+
+    private static JsonObject BuildJsonObject(Type type, object instance)
+    {
+        var obj = new JsonObject();
+
+        foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (!property.CanRead)
+                continue;
+
+            try
+            {
+                var value = property.GetValue(instance);
+                var jsonKey = ReadJsonPropertyName(property) ?? property.Name;
+
+                if (value is null)
+                    continue;
+
+                var propType = property.PropertyType;
+
+                // Handle nested config objects (e.g. ConfigCommon, ConfigP5R).
+                if (propType.IsClass && propType != typeof(string) && !propType.IsArray)
+                {
+                    var nested = BuildJsonObject(propType, value);
+                    if (nested.Count > 0)
+                        obj[jsonKey] = nested;
+                }
+                else if (propType == typeof(bool))
+                {
+                    obj[jsonKey] = (bool)value;
+                }
+                else if (propType == typeof(int))
+                {
+                    obj[jsonKey] = (long)(int)value;
+                }
+                else if (propType == typeof(long))
+                {
+                    obj[jsonKey] = (long)value;
+                }
+                else if (propType == typeof(float))
+                {
+                    obj[jsonKey] = (double)(float)value;
+                }
+                else if (propType == typeof(double))
+                {
+                    obj[jsonKey] = (double)value;
+                }
+                else if (propType == typeof(string))
+                {
+                    obj[jsonKey] = (string)value;
+                }
+                else if (propType.IsEnum)
+                {
+                    obj[jsonKey] = value.ToString() ?? "";
+                }
+            }
+            catch
+            {
+                // Skip properties that can't be read.
+            }
+        }
+
+        return obj;
     }
 
     private static IReadOnlyDictionary<string, string> ReadDisplayNamesCore(string dllPath)

@@ -88,7 +88,9 @@ public sealed class ModScanner
                 else
                 {
                     var options = ScanOptions(subdirectory, issues);
-                    mods.Add(new DiscoveredMod { Manifest = manifest, Directory = subdirectory, Options = options });
+                    var contentSubs = ScanContentSubModules(subdirectory, issues);
+                    var allOptions = options.Concat(contentSubs).ToList();
+                    mods.Add(new DiscoveredMod { Manifest = manifest, Directory = subdirectory, Options = allOptions });
                 }
             }
 
@@ -130,6 +132,59 @@ public sealed class ModScanner
                 Name = optionName,
                 Directory = optionDir,
                 RelativePath = relativePath,
+            });
+        }
+
+        return options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// Detects content subdirectories at the mod's root level — folders that
+    /// don't have a ModConfig.json and don't contain DLLs. Mods like
+    /// p5rpc.texturefixesproject ship texture packs as subdirectories (e.g.
+    /// BetterJokerTycoonPortrait/) that users want to toggle on/off.
+    /// Directories named Options, Cache, x86, x64, or starting with _
+    /// are excluded.
+    /// </summary>
+    private IReadOnlyList<ModOption> ScanContentSubModules(string modDirectory, List<ScanIssue> issues)
+    {
+        var options = new List<ModOption>();
+        IEnumerable<string> subdirectories;
+        try
+        {
+            subdirectories = Directory.EnumerateDirectories(modDirectory);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+
+        foreach (var subdir in subdirectories)
+        {
+            var name = Path.GetFileName(subdir);
+
+            // Skip well-known non-content directories.
+            if (name.Equals(OptionsDirectoryName, StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("Cache", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("x86", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("x64", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith('_'))
+                continue;
+
+            // Skip directories that have a ModConfig.json (those are nested mods, not content).
+            if (File.Exists(Path.Combine(subdir, ModManifest.FileName)))
+                continue;
+
+            // Skip directories that contain DLLs (those are dependency folders, not content).
+            if (Directory.EnumerateFiles(subdir, "*.dll").Any())
+                continue;
+
+            // This looks like a content sub-module (e.g. texture pack folder).
+            options.Add(new ModOption
+            {
+                Name = name,
+                Directory = subdir,
+                RelativePath = name,
             });
         }
 
