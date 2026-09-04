@@ -256,4 +256,78 @@ public class ModScannerTests
         Assert.Equal("HDTextures", option.RelativePath);
         Assert.DoesNotContain(".disabled", option.Directory);
     }
+
+    [Fact]
+    public void DiscoversNestedOptionDirectories()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/NestedOptions", "mod.nested.options");
+
+        // Mirror the ps4reverts layout: two-level options tree.
+        var optionsDir = Path.Combine(modDir, "Options");
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Almighty Skill Icon"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Ryuji Shoes"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Epilepsy", "All-Out-Attack Animation"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Others", "One-way Airlock Color"));
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+        var mod = Assert.Single(result.Mods);
+
+        // All four leaves should appear; no grouping folders (Censorship etc.).
+        Assert.Equal(4, mod.Options.Count);
+        Assert.DoesNotContain(mod.Options, o => o.Name == "Censorship");
+        Assert.DoesNotContain(mod.Options, o => o.Name == "Epilepsy");
+
+        var almighty = mod.Options.Single(o => o.Name == "Almighty Skill Icon");
+        Assert.Equal("Options/Censorship/Almighty Skill Icon", almighty.RelativePath);
+        Assert.EndsWith(Path.Combine("Censorship", "Almighty Skill Icon"), almighty.Directory);
+
+        var ryuji = mod.Options.Single(o => o.Name == "Ryuji Shoes");
+        Assert.Equal("Options/Censorship/Ryuji Shoes", ryuji.RelativePath);
+
+        var other = mod.Options.Single(o => o.Name == "One-way Airlock Color");
+        Assert.Equal("Options/Others/One-way Airlock Color", other.RelativePath);
+    }
+
+    [Fact]
+    public void NestedDisabledOptionDirectoriesAreNormalized()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/NestedOptions", "mod.nested.options");
+
+        var optionsDir = Path.Combine(modDir, "Options");
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship"));
+        // Leaf disabled by OptionStateHealer rename.
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Ryuji Shoes.disabled"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship", "Almighty Skill Icon"));
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+        var mod = Assert.Single(result.Mods);
+
+        Assert.Equal(2, mod.Options.Count);
+        var disabled = mod.Options.Single(o => o.Name == "Ryuji Shoes");
+        Assert.Equal("Options/Censorship/Ryuji Shoes", disabled.RelativePath);
+        Assert.DoesNotContain(".disabled", disabled.Directory);
+    }
+
+    [Fact]
+    public void DisabledGroupingFolderStillExposesLeaves()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/NestedOptions", "mod.nested.options");
+
+        var optionsDir = Path.Combine(modDir, "Options");
+        // Whole category disabled by a previous launch (renamed with .disabled).
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship.disabled", "Ryuji Shoes"));
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+        var mod = Assert.Single(result.Mods);
+
+        // The leaf is still discoverable under its canonical path so the user
+        // can re-enable it individually.
+        var leaf = Assert.Single(mod.Options);
+        Assert.Equal("Ryuji Shoes", leaf.Name);
+        Assert.Equal("Options/Censorship/Ryuji Shoes", leaf.RelativePath);
+        Assert.DoesNotContain(".disabled", leaf.Directory);
+    }
 }

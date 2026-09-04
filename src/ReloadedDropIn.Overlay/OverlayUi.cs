@@ -163,18 +163,69 @@ public sealed class OverlayUi(
     {
         _imgui.Indent(16);
         _imgui.TextDisabled("Options:");
-        foreach (var option in mod.Options)
+        RenderOptionTree(mod, mod.Options, depth: 0);
+        _imgui.Unindent(16);
+    }
+
+    /// <summary>
+    /// Renders options as a tree grouped by their path segments (e.g.
+    /// Options/Censorship/Ryuji Shoes renders "Censorship" as a collapsible
+    /// section containing the "Ryuji Shoes" checkbox). Options directly under
+    /// Options/ render as plain checkboxes.
+    /// </summary>
+    private void RenderOptionTree(CatalogMod mod, List<CatalogModOption> options, int depth)
+    {
+        var leaves = new List<CatalogModOption>();
+        var groups = new Dictionary<string, List<CatalogModOption>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var option in options)
         {
-            _imgui.PushId(option.RelativePath);
-            var enabled = option.Enabled;
-            if (_imgui.Checkbox(option.Name, ref enabled))
+            var segments = GetOptionSegments(option.RelativePath);
+            if (segments.Length == depth + 1)
+                leaves.Add(option);
+            else
             {
-                option.Enabled = enabled;
-                Save(() => _catalog.SaveToggles(), "option toggles");
+                var key = segments[depth];
+                if (!groups.TryGetValue(key, out var list))
+                    groups[key] = list = [];
+                list.Add(option);
+            }
+        }
+
+        foreach (var leaf in leaves.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase))
+            RenderOptionCheckbox(mod, leaf);
+
+        foreach (var group in groups.OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            _imgui.PushId(group.Key);
+            if (_imgui.CollapsingHeader(group.Key, 0))
+            {
+                _imgui.Indent(16);
+                RenderOptionTree(mod, group.Value, depth + 1);
+                _imgui.Unindent(16);
             }
             _imgui.PopId();
         }
-        _imgui.Unindent(16);
+    }
+
+    private static string[] GetOptionSegments(string relativePath)
+    {
+        var path = relativePath.StartsWith("Options/", StringComparison.Ordinal)
+            ? relativePath["Options/".Length..]
+            : relativePath;
+        return path.Split('/');
+    }
+
+    private void RenderOptionCheckbox(CatalogMod mod, CatalogModOption option)
+    {
+        _imgui.PushId(option.RelativePath);
+        var enabled = option.Enabled;
+        if (_imgui.Checkbox(option.Name, ref enabled))
+        {
+            option.Enabled = enabled;
+            Save(() => _catalog.SaveToggles(), "option toggles");
+        }
+        _imgui.PopId();
     }
 
     private void RenderConfigEditor(CatalogMod mod)

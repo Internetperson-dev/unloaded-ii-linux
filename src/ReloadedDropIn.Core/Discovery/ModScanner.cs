@@ -102,8 +102,10 @@ public sealed class ModScanner
 
     /// <summary>
     /// Scans for sub-module options inside a mod's Options/ directory.
-    /// Each subdirectory becomes a toggleable option; directories without
-    /// a manifest are still treated as options (content-only folders).
+    /// The tree is walked recursively, so option folders nested several levels
+    /// deep (e.g. Options/Censorship/Ryuji Shoes/) are discovered. Grouping
+    /// folders that contain further subdirectories are not themselves exposed
+    /// as toggles — only the leaf folders that hold the actual content are.
     /// Directories ending with .disabled are mapped back to their original name.
     /// </summary>
     private IReadOnlyList<ModOption> ScanOptions(string modDirectory, List<ScanIssue> issues)
@@ -113,31 +115,59 @@ public sealed class ModScanner
             return [];
 
         var options = new List<ModOption>();
-        IEnumerable<string> optionDirectories;
+        ScanOptionDirectories(optionsDir, optionsDir, options, issues);
+        return options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private void ScanOptionDirectories(
+        string directory,
+        string optionsRoot,
+        List<ModOption> options,
+        List<ScanIssue> issues)
+    {
+        IEnumerable<string> subdirectories;
         try
         {
-            optionDirectories = Directory.EnumerateDirectories(optionsDir);
+            subdirectories = Directory.EnumerateDirectories(directory);
         }
         catch (UnauthorizedAccessException)
         {
-            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, optionsDir, "permission denied reading Options/"));
-            return [];
+            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, directory, "permission denied reading Options/"));
+            return;
         }
 
-        foreach (var optionDir in optionDirectories)
+        foreach (var subdir in subdirectories)
         {
-            var rawName = Path.GetFileName(optionDir);
-            var (name, dirPath) = NormalizeDisabledDirectory(rawName, optionDir);
-            var relativePath = Path.Combine(OptionsDirectoryName, name);
+            var rawName = Path.GetFileName(subdir);
+            var (name, canonicalPath) = NormalizeDisabledDirectory(rawName, subdir);
+
+            // Recurse first so nested option folders are discovered regardless
+            // of whether this directory is itself exposed as a toggle. Use the
+            // on-disk path so a .disabled parent is still explored.
+            ScanOptionDirectories(subdir, optionsRoot, options, issues);
+
+            // Grouping folders (contain further subdirectories) are not toggles.
+            bool hasChildren;
+            try
+            {
+                hasChildren = Directory.EnumerateDirectories(subdir).Any();
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+
+            if (hasChildren)
+                continue;
+
+            var relativePath = Path.GetRelativePath(optionsRoot, canonicalPath);
             options.Add(new ModOption
             {
                 Name = name,
-                Directory = dirPath,
-                RelativePath = relativePath,
+                Directory = canonicalPath,
+                RelativePath = Path.Combine(OptionsDirectoryName, relativePath),
             });
         }
-
-        return options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>
