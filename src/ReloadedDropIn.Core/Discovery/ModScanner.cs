@@ -199,19 +199,19 @@ public sealed class ModScanner
     /// The option has no physical directory because it is implemented by a
     /// runtime executable-memory patch rather than filesystem content.
     /// </summary>
-    private static ModOption CreateSkipIntroOption()
+private static ModOption CreateSkipIntroOption()
+{
+    return new ModOption
     {
-        return new ModOption
-        {
-            Name = SkipIntroOptionName,
+        Name = SkipIntroOptionName,
 
-            // Built-in runtime options do not point at a real filesystem directory.
-            Directory = null,
+        // Built-in runtime option; no real filesystem directory is used.
+        // The special RelativePath identifies this option to the runtime layer.
+        Directory = string.Empty,
 
-            // Stable identifier used by the option-state layer.
-            RelativePath = $"__builtin/{SkipIntroOptionId}",
-        };
-    }
+        RelativePath = $"__builtin/{SkipIntroOptionId}",
+    };
+}
 
     /// <summary>
     /// Scans for sub-module options inside a mod's Options/ directory.
