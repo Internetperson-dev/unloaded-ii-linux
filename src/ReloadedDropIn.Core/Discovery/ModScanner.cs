@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ReloadedDropIn.Core.Manifests;
 
 namespace ReloadedDropIn.Core.Discovery;
@@ -17,6 +18,14 @@ public sealed class ModScanner
 
     /// <summary>Name of the directory that holds sub-module options within a mod.</summary>
     public const string OptionsDirectoryName = "Options";
+
+    /// <summary>
+    /// Reloaded-II's release manifest. Its Hashes.Files contain every path the mod
+    /// ships, including option folders that may not be present on disk yet (e.g.
+    /// optional content the user has not downloaded). We use it to surface the
+    /// full, authoritative option set even when the folder was never installed.
+    /// </summary>
+    public const string UpdateMetadataFileName = "Sewer56.Update.Metadata.json";
 
     public ScanResult Scan(string modsDirectory)
     {
@@ -116,7 +125,91 @@ public sealed class ModScanner
 
         var options = new List<ModOption>();
         ScanOptionDirectories(optionsDir, canonicalDirectory: optionsDir, optionsRoot: optionsDir, options, issues);
+        MergeUpdateMetadataOptions(modDirectory, optionsRoot: optionsDir, options);
         return options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// Adds option folders declared in Sewer56.Update.Metadata.json that are
+    /// not present on disk, so the overlay shows the mod's full option set
+    /// (e.g. optional content the user has not downloaded yet). Folders already
+    /// discovered on disk are left untouched; the metadata only supplements.
+    ///
+    /// The option granularity mirrors the on-disk scan: when the mod already
+    /// has two-level options (Options/&lt;category&gt;/&lt;option&gt;/) the metadata is
+    /// read the same way; otherwise one-level options are assumed.
+    /// </summary>
+    private void MergeUpdateMetadataOptions(string modDirectory, string optionsRoot, List<ModOption> options)
+    {
+        if (options.Count == 0)
+            return;
+
+        var metadataPath = Path.Combine(modDirectory, UpdateMetadataFileName);
+        if (!File.Exists(metadataPath))
+            return;
+
+        List<string> filePaths;
+        try
+        {
+            filePaths = ReadUpdateMetadataFilePaths(metadataPath);
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        if (filePaths.Count == 0)
+            return;
+
+        var twoLevel = options.Any(o => o.RelativePath.StartsWith("Options/", StringComparison.Ordinal)
+            && o.RelativePath["Options/".Length..].Contains('/'));
+
+        var existing = new HashSet<string>(options.Select(o => o.RelativePath), StringComparer.OrdinalIgnoreCase);
+        const string optionsPrefix = "Options/";
+
+        foreach (var relative in filePaths)
+        {
+            var normalized = relative.Replace('\\', '/');
+            if (!normalized.StartsWith(optionsPrefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var segments = normalized[optionsPrefix.Length..].Split('/');
+            var candidate = twoLevel
+                ? segments.Length >= 2 ? string.Join('/', segments.Take(2)) : null
+                : segments.Length >= 1 ? segments[0] : null;
+            if (candidate is null)
+                continue;
+
+            var relativePath = optionsPrefix + candidate;
+            if (!existing.Add(relativePath))
+                continue;
+
+            options.Add(new ModOption
+            {
+                Name = candidate.Split('/')[^1],
+                Directory = Path.Combine(optionsRoot, candidate),
+                RelativePath = relativePath,
+            });
+        }
+    }
+
+    private static List<string> ReadUpdateMetadataFilePaths(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        if (!document.RootElement.TryGetProperty("Hashes", out var hashes) ||
+            !hashes.TryGetProperty("Files", out var files) ||
+            files.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var result = new List<string>();
+        foreach (var entry in files.EnumerateArray())
+        {
+            if (entry.TryGetProperty("RelativePath", out var relative) &&
+                relative.ValueKind == JsonValueKind.String)
+                result.Add(relative.GetString()!);
+        }
+
+        return result;
     }
 
     private void ScanOptionDirectories(

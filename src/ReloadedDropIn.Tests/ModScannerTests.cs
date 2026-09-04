@@ -311,6 +311,78 @@ public class ModScannerTests
     }
 
     [Fact]
+    public void UpdateMetadataDeclaresOptionsMissingOnDisk()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/MetaMod", "meta.options.mod");
+
+        // On disk, one two-level option is installed.
+        Directory.CreateDirectory(Path.Combine(modDir, "Options", "Category", "Existing Option"));
+        File.WriteAllText(Path.Combine(modDir, "Options", "Category", "Existing Option", "a.GMD"), "fake");
+
+        // Release manifest lists two more two-level options that were never installed.
+        File.WriteAllText(Path.Combine(modDir, "Sewer56.Update.Metadata.json"), """
+        {
+          "ExtraData": null, "Type": 0, "Version": "1.5.0",
+          "Hashes": {
+            "Files": [
+              { "RelativePath": "ModConfig.json", "Hash": 1 },
+              { "RelativePath": "Options\\Category\\Existing Option\\BASE.CPK\\a.GMD", "Hash": 2 },
+              { "RelativePath": "Options\\Category\\Missing Option A\\BASE.CPK\\b.GMD", "Hash": 3 },
+              { "RelativePath": "Options\\Category\\Missing Option B\\BASE.CPK\\c.GMD", "Hash": 4 }
+            ]
+          },
+          "IgnoreRegexes": [], "IncludeRegexes": [], "DeltaData": null
+        }
+        """);
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+        var mod = Assert.Single(result.Mods);
+
+        Assert.Equal(3, mod.Options.Count);
+        Assert.Contains(mod.Options, o => o.Name == "Existing Option" && o.RelativePath == "Options/Category/Existing Option");
+
+        var missingA = mod.Options.Single(o => o.Name == "Missing Option A");
+        Assert.Equal("Options/Category/Missing Option A", missingA.RelativePath);
+        Assert.EndsWith(Path.Combine("Category", "Missing Option A"), missingA.Directory);
+        Assert.DoesNotContain(".disabled", missingA.Directory);
+
+        var missingB = mod.Options.Single(o => o.Name == "Missing Option B");
+        Assert.Equal("Options/Category/Missing Option B", missingB.RelativePath);
+    }
+
+    [Fact]
+    public void UpdateMetadataSingleLevelOptions()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/MetaModSingle", "meta.single.options.mod");
+
+        // One-level options: Options/<OptionName>/.
+        Directory.CreateDirectory(Path.Combine(modDir, "Options", "Existing One"));
+        File.WriteAllText(Path.Combine(modDir, "Options", "Existing One", "x.dll"), "fake");
+
+        File.WriteAllText(Path.Combine(modDir, "Sewer56.Update.Metadata.json"), """
+        {
+          "ExtraData": null, "Type": 0, "Version": "1.0.0",
+          "Hashes": {
+            "Files": [
+              { "RelativePath": "Options\\Existing One\\x.dll", "Hash": 1 },
+              { "RelativePath": "Options\\Missing One\\y.dll", "Hash": 2 }
+            ]
+          },
+          "IgnoreRegexes": [], "IncludeRegexes": [], "DeltaData": null
+        }
+        """);
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+        var mod = Assert.Single(result.Mods);
+
+        Assert.Equal(2, mod.Options.Count);
+        Assert.Contains(mod.Options, o => o.Name == "Existing One");
+        Assert.Contains(mod.Options, o => o.Name == "Missing One" && o.RelativePath == "Options/Missing One");
+    }
+
+    [Fact]
     public void DisabledGroupingFolderStillExposesLeaves()
     {
         using var temp = new TempDirectory();
