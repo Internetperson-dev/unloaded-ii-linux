@@ -5,8 +5,7 @@ namespace ReloadedDropIn.Core.Discovery;
 
 /// <summary>
 /// Finds Reloaded mods under a mods/ directory.
-///
-/// Handles 3 distinct mod architectures:
+/// Handles distinct mod architectures:
 /// 1. Native Reloaded-II C# Options (Code-Based via ModConfig.json)
 /// 2. Directory-Based Multi-Option Mods (Category folders under Options/)
 /// 3. Standalone Sub-Mod / Toggle Folders (Direct subfolders with optional .disabled suffixes)
@@ -19,25 +18,19 @@ public sealed class ModScanner
     /// <summary>Name of the directory that holds sub-module options within a mod.</summary>
     public const string OptionsDirectoryName = "Options";
 
-    /// <summary>
-    /// Reloaded-II's release manifest. Its Hashes.Files list every path the mod
-    /// ships, which lets us tell real option folders apart from stray content
-    /// folders that live inside the Options/ tree (e.g. BASE.CPK, FONT/, BUSTUP/...).
-    /// </summary>
     public const string UpdateMetadataFileName = "Sewer56.Update.Metadata.json";
 
     private static readonly HashSet<string> s_ignoredContentFolders = new(StringComparer.OrdinalIgnoreCase)
     {
         OptionsDirectoryName,
         "Cache", "x86", "x64", "bin", "obj", ".git", ".vs",
-        // Modloader / Framework routing folders (Not toggleable options)
         "FEmulator", "P5REssentials", "BGME", "UnrealEssentials", 
         "CriFs.V2.Hook.ReloadedII", "CriFs.V2.Hook.ReloadedII.Prs",
         "RyuModManager", "AFSLib", "Afs2Lib",
-        // Common game data folders (Not toggleable options)
+        // Game asset directories that shouldn't be treated as standalone mods/options directly
         "FONT", "IMAGE", "ITEM", "OBJECT", "RECOVERY", "ROADMAP", 
         "SKILL", "SP_ATTACK", "BATTLE", "CAMP", "EVENT", "FIELD", 
-        "SOUND", "GUI", "BGM", "SE", "VOICE", "MOVIE"
+        "SOUND", "GUI", "BGM", "SE", "VOICE", "MOVIE", "BUSTUP", "MINIGAME"
     };
 
     public ScanResult Scan(string modsDirectory)
@@ -338,34 +331,26 @@ public sealed class ModScanner
             var rawName = Path.GetFileName(subdir);
             var (name, canonicalPath) = NormalizeDisabledDirectory(rawName, subdir);
 
-            // Filter out system folders and common modloader / game data directories
             if (s_ignoredContentFolders.Contains(name) || name.StartsWith('_') || name.StartsWith('.'))
-            {
                 continue;
-            }
 
-            // Exclude directories named after game archive files (e.g. CPK/BIN mounter folders)
             if (name.Contains(".BIN", StringComparison.OrdinalIgnoreCase) ||
                 name.Contains(".CPK", StringComparison.OrdinalIgnoreCase) ||
                 name.Contains(".PAC", StringComparison.OrdinalIgnoreCase) ||
                 name.Contains(".ARC", StringComparison.OrdinalIgnoreCase) ||
                 name.Contains(".AWB", StringComparison.OrdinalIgnoreCase) ||
                 name.Contains(".ACB", StringComparison.OrdinalIgnoreCase))
-            {
                 continue;
-            }
 
-            var diskPath = subdir;
-
-            if (File.Exists(Path.Combine(diskPath, ModManifest.FileName)))
+            if (File.Exists(Path.Combine(subdir, ModManifest.FileName)))
                 continue;
 
             bool hasDlls;
             try
             {
-                hasDlls = Directory.EnumerateFiles(diskPath, "*.dll").Any();
+                hasDlls = Directory.EnumerateFiles(subdir, "*.dll").Any();
             }
-            catch (Exception)
+            catch
             {
                 continue;
             }
