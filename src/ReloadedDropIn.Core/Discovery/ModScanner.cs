@@ -104,6 +104,7 @@ public sealed class ModScanner
     /// Scans for sub-module options inside a mod's Options/ directory.
     /// Each subdirectory becomes a toggleable option; directories without
     /// a manifest are still treated as options (content-only folders).
+    /// Directories ending with .disabled are mapped back to their original name.
     /// </summary>
     private IReadOnlyList<ModOption> ScanOptions(string modDirectory, List<ScanIssue> issues)
     {
@@ -125,12 +126,13 @@ public sealed class ModScanner
 
         foreach (var optionDir in optionDirectories)
         {
-            var optionName = Path.GetFileName(optionDir);
-            var relativePath = Path.Combine(OptionsDirectoryName, optionName);
+            var rawName = Path.GetFileName(optionDir);
+            var (name, dirPath) = NormalizeDisabledDirectory(rawName, optionDir);
+            var relativePath = Path.Combine(OptionsDirectoryName, name);
             options.Add(new ModOption
             {
-                Name = optionName,
-                Directory = optionDir,
+                Name = name,
+                Directory = dirPath,
                 RelativePath = relativePath,
             });
         }
@@ -144,7 +146,8 @@ public sealed class ModScanner
     /// p5rpc.texturefixesproject ship texture packs as subdirectories (e.g.
     /// BetterJokerTycoonPortrait/) that users want to toggle on/off.
     /// Directories named Options, Cache, x86, x64, or starting with _
-    /// are excluded.
+    /// are excluded. Directories ending with .disabled are mapped back to
+    /// their original name.
     /// </summary>
     private IReadOnlyList<ModOption> ScanContentSubModules(string modDirectory, List<ScanIssue> issues)
     {
@@ -161,7 +164,8 @@ public sealed class ModScanner
 
         foreach (var subdir in subdirectories)
         {
-            var name = Path.GetFileName(subdir);
+            var rawName = Path.GetFileName(subdir);
+            var (name, dirPath) = NormalizeDisabledDirectory(rawName, subdir);
 
             // Skip well-known non-content directories.
             if (name.Equals(OptionsDirectoryName, StringComparison.OrdinalIgnoreCase) ||
@@ -172,22 +176,41 @@ public sealed class ModScanner
                 continue;
 
             // Skip directories that have a ModConfig.json (those are nested mods, not content).
-            if (File.Exists(Path.Combine(subdir, ModManifest.FileName)))
+            if (File.Exists(Path.Combine(dirPath, ModManifest.FileName)))
                 continue;
 
             // Skip directories that contain DLLs (those are dependency folders, not content).
-            if (Directory.EnumerateFiles(subdir, "*.dll").Any())
+            if (Directory.EnumerateFiles(dirPath, "*.dll").Any())
                 continue;
 
             // This looks like a content sub-module (e.g. texture pack folder).
             options.Add(new ModOption
             {
                 Name = name,
-                Directory = subdir,
+                Directory = dirPath,
                 RelativePath = name,
             });
         }
 
         return options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// Strips the .disabled suffix from a directory name so the scanner maps
+    /// renamed (disabled) directories back to their original option identity.
+    /// Always returns the canonical (non-.disabled) directory path so that
+    /// OptionStateHealer can derive the correct .disabled path.
+    /// </summary>
+    private static (string Name, string Directory) NormalizeDisabledDirectory(string rawName, string fullPath)
+    {
+        const string disabledSuffix = ".disabled";
+        if (rawName.EndsWith(disabledSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            var originalName = rawName[..^disabledSuffix.Length];
+            var canonicalPath = Path.Combine(Path.GetDirectoryName(fullPath)!, originalName);
+            return (originalName, canonicalPath);
+        }
+
+        return (rawName, fullPath);
     }
 }

@@ -23,9 +23,6 @@ internal static class ModConfigMetadata
     private const string JsonPropertyNameAttributeName =
         "System.Text.Json.Serialization.JsonPropertyNameAttribute";
 
-    private const string ConfigurableAttributeName =
-        "Reloaded.Mod.Template.Configuration.ConfigurableAttribute";
-
     private static readonly IReadOnlyDictionary<string, string> Empty =
         new Dictionary<string, string>();
 
@@ -77,18 +74,28 @@ internal static class ModConfigMetadata
         using var mlc = new MetadataLoadContext(new PathAssemblyResolver(paths));
         var assembly = mlc.LoadFromAssemblyPath(dllPath);
 
-        // Find the [Configurable] class (e.g. Config : Configurable<Config>).
+        // Find the config class: inherits from Configurable<T> (Reloaded-II template pattern).
+        // The base class is typically `Reloaded.Mod.Template.Configuration.Configurable<T>`.
         Type? configType = null;
         foreach (var type in GetLoadableTypes(assembly))
         {
             try
             {
-                if (type.GetCustomAttributesData().Any(a =>
-                    TryGetFullName(a, out var name) && name == ConfigurableAttributeName))
+                var baseType = type.BaseType;
+                while (baseType is not null)
                 {
-                    configType = type;
-                    break;
+                    if (baseType.IsGenericType &&
+                        baseType.GetGenericTypeDefinition().FullName?
+                            .StartsWith("Reloaded.Mod.Template.Configuration.Configurable") == true)
+                    {
+                        configType = type;
+                        break;
+                    }
+                    baseType = baseType.BaseType;
                 }
+
+                if (configType is not null)
+                    break;
             }
             catch { }
         }
