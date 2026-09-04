@@ -5,10 +5,11 @@ namespace ReloadedDropIn.Core.Discovery;
 
 /// <summary>
 /// Finds Reloaded mods under a mods/ directory.
-/// Handles distinct mod architectures:
-/// 1. Native Reloaded-II C# Options (Code-Based via ModConfig.json)
-/// 2. Directory-Based Multi-Option Mods (Category folders under Options/)
-/// 3. Standalone Sub-Mod / Toggle Folders (Direct subfolders with optional .disabled suffixes)
+///
+/// Rule (plan §12): a mod is a directory containing a valid ModConfig.json.
+/// The scan is depth-limited, never executes mod code, rejects duplicate mod IDs
+/// deterministically (lexicographically-first directory wins), and reports every
+/// ignored entry with a reason.
 /// </summary>
 public sealed class ModScanner
 {
@@ -18,20 +19,29 @@ public sealed class ModScanner
     /// <summary>Name of the directory that holds sub-module options within a mod.</summary>
     public const string OptionsDirectoryName = "Options";
 
+    /// <summary>
+    /// Reloaded-II's release manifest. Its Hashes.Files contain every path the mod
+    /// ships, including option folders that may not be present on disk yet (e.g.
+    /// optional content the user has not downloaded). We use it to surface the
+    /// full, authoritative option set even when the folder was never installed.
+    /// </summary>
     public const string UpdateMetadataFileName = "Sewer56.Update.Metadata.json";
 
-    private static readonly HashSet<string> s_ignoredContentFolders = new(StringComparer.OrdinalIgnoreCase)
+    /// <summary>
+    /// Names of the game's own top-level asset folders. As soon as one of these
+    /// (or any "*.CPK" archive folder) turns up as a direct child of a candidate
+    /// option folder, everything below it is the mod's payload - the game's own
+    /// directory layout - not further options to expose as toggles. Extend this
+    /// set if a mod ships content under a top-level folder not listed here.
+    /// </summary>
+    private static readonly HashSet<string> GameContentRootNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        OptionsDirectoryName,
-        "Cache", "x86", "x64", "bin", "obj", ".git", ".vs",
-        "FEmulator", "P5REssentials", "BGME", "UnrealEssentials", 
-        "CriFs.V2.Hook.ReloadedII", "CriFs.V2.Hook.ReloadedII.Prs",
-        "RyuModManager", "AFSLib", "Afs2Lib",
-        // Game asset directories that shouldn't be treated as standalone mods/options directly
-        "FONT", "IMAGE", "ITEM", "OBJECT", "RECOVERY", "ROADMAP", 
-        "SKILL", "SP_ATTACK", "BATTLE", "CAMP", "EVENT", "FIELD", 
-        "SOUND", "GUI", "BGM", "SE", "VOICE", "MOVIE", "BUSTUP", "MINIGAME"
+        "MODEL", "FIELD", "FONT", "BATTLE", "BUSTUP", "EVENT", "IMAGE", "MINIGAME", "DATA",
     };
+
+    private static bool IsGameContentRoot(string directoryName) =>
+        directoryName.EndsWith(".CPK", StringComparison.OrdinalIgnoreCase)
+        || GameContentRootNames.Contains(directoryName);
 
     public ScanResult Scan(string modsDirectory)
     {
@@ -41,25 +51,19 @@ public sealed class ModScanner
         if (!Directory.Exists(modsDirectory))
             return new ScanResult { Mods = [], Issues = [] };
 
-        try
+        foreach (var file in Directory.EnumerateFiles(modsDirectory))
         {
-            foreach (var file in Directory.EnumerateFiles(modsDirectory))
-            {
-                if (!Path.GetFileName(file).Equals("PUT_MODS_HERE.txt", StringComparison.OrdinalIgnoreCase))
-                    issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, file, "loose file in mods/ (mods must be extracted folders)"));
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, modsDirectory, "could not enumerate root directory files"));
+            if (!Path.GetFileName(file).Equals("PUT_MODS_HERE.txt", StringComparison.OrdinalIgnoreCase))
+                issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, file, "loose file in mods/ (mods must be extracted folders)"));
         }
 
         ScanDirectory(modsDirectory, depth: 0, mods, issues);
 
+        // Deterministic order: sort candidates by directory path, then keep the first
+        // occurrence of each ModId so duplicate resolution never depends on OS enumeration order.
         var sorted = mods.OrderBy(m => m.Directory, StringComparer.Ordinal).ToList();
         var byId = new Dictionary<string, DiscoveredMod>(StringComparer.OrdinalIgnoreCase);
         var unique = new List<DiscoveredMod>();
-
         foreach (var mod in sorted)
         {
             if (byId.TryGetValue(mod.ModId, out var existing))
@@ -92,9 +96,9 @@ public sealed class ModScanner
         {
             subdirectories = Directory.EnumerateDirectories(directory);
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
+        catch (UnauthorizedAccessException)
         {
-            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, directory, "permission denied or I/O error"));
+            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, directory, "permission denied"));
             return;
         }
 
@@ -103,83 +107,33 @@ public sealed class ModScanner
             var manifestPath = Path.Combine(subdirectory, ModManifest.FileName);
             if (File.Exists(manifestPath))
             {
-                string manifestText;
-                try
-                {
-                    manifestText = File.ReadAllText(manifestPath);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    issues.Add(new ScanIssue(ScanIssueKind.InvalidManifest, manifestPath, $"Failed to read manifest: {ex.Message}"));
-                    goto Recurse;
-                }
-
-                var manifest = ModManifest.TryParse(manifestText, out var error);
+                var manifest = ModManifest.TryParse(File.ReadAllText(manifestPath), out var error);
                 if (manifest is null)
-                {
                     issues.Add(new ScanIssue(ScanIssueKind.InvalidManifest, manifestPath, error!));
-                }
                 else
                 {
                     var options = ScanOptions(subdirectory, issues);
                     var contentSubs = ScanContentSubModules(subdirectory, issues);
-                    var configOptions = ScanModConfigOptions(manifestText, subdirectory);
-
-                    var allOptions = options
-                        .Concat(contentSubs)
-                        .Concat(configOptions)
-                        .DistinctBy(o => o.RelativePath, StringComparer.OrdinalIgnoreCase)
-                        .ToList();
-
-                    mods.Add(new DiscoveredMod 
-                    { 
-                        Manifest = manifest, 
-                        Directory = subdirectory, 
-                        Options = allOptions 
-                    });
+                    var allOptions = options.Concat(contentSubs).ToList();
+                    mods.Add(new DiscoveredMod { Manifest = manifest, Directory = subdirectory, Options = allOptions });
                 }
             }
 
-        Recurse:
+            // Always recurse: some mods contain nested mods in subdirectories
+            // (e.g. texturefixesproject has sub-mods with their own ModConfig.json).
             ScanDirectory(subdirectory, depth + 1, mods, issues);
         }
     }
 
-    private static IEnumerable<ModOption> ScanModConfigOptions(string manifestText, string modDirectory)
-    {
-        var result = new List<ModOption>();
-        try
-        {
-            using var doc = JsonDocument.Parse(manifestText);
-            if (doc.RootElement.TryGetProperty("ConfigurableOptions", out var configOpts) &&
-                configOpts.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var opt in configOpts.EnumerateArray())
-                {
-                    if (opt.TryGetProperty("Id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
-                    {
-                        var id = idProp.GetString()!;
-                        var name = opt.TryGetProperty("Name", out var nameProp) && nameProp.ValueKind == JsonValueKind.String
-                            ? nameProp.GetString()!
-                            : id;
-
-                        result.Add(new ModOption
-                        {
-                            Name = name,
-                            Directory = Path.Combine(modDirectory, ".config", id),
-                            RelativePath = $"config:{id}"
-                        });
-                    }
-                }
-            }
-        }
-        catch
-        {
-        }
-
-        return result;
-    }
-
+    /// <summary>
+    /// Scans for sub-module options inside a mod's Options/ directory.
+    /// The tree is walked recursively, so option folders nested several levels
+    /// deep (e.g. Options/Censorship/Ryuji Shoes/) are discovered. Grouping
+    /// folders that only contain further named folders are not themselves
+    /// exposed as toggles - only the folders that actually hold the mod's
+    /// content are. Directories ending with .disabled are mapped back to
+    /// their original name.
+    /// </summary>
     private IReadOnlyList<ModOption> ScanOptions(string modDirectory, List<ScanIssue> issues)
     {
         var optionsDir = Path.Combine(modDirectory, OptionsDirectoryName);
@@ -187,19 +141,29 @@ public sealed class ModScanner
             return [];
 
         var options = new List<ModOption>();
-        var (declared, optionDepth) = ReadUpdateMetadataOptionPaths(modDirectory);
-
-        ScanOptionLevel(optionsDir, canonicalDirectory: optionsDir, optionsRoot: optionsDir,
-            depth: 0, optionDepth: optionDepth, declared: declared, options: options, issues: issues);
-
+        ScanOptionDirectories(optionsDir, canonicalDirectory: optionsDir, optionsRoot: optionsDir, options, issues);
+        MergeUpdateMetadataOptions(modDirectory, optionsRoot: optionsDir, options);
         return options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static (HashSet<string>? OptionPaths, int OptionDepth) ReadUpdateMetadataOptionPaths(string modDirectory)
+    /// <summary>
+    /// Adds option folders declared in Sewer56.Update.Metadata.json that are
+    /// not present on disk, so the overlay shows the mod's full option set
+    /// (e.g. optional content the user has not downloaded yet). Folders already
+    /// discovered on disk are left untouched; the metadata only supplements.
+    ///
+    /// The option granularity mirrors the on-disk scan: when the mod already
+    /// has two-level options (Options/&lt;category&gt;/&lt;option&gt;/) the metadata is
+    /// read the same way; otherwise one-level options are assumed.
+    /// </summary>
+    private void MergeUpdateMetadataOptions(string modDirectory, string optionsRoot, List<ModOption> options)
     {
+        if (options.Count == 0)
+            return;
+
         var metadataPath = Path.Combine(modDirectory, UpdateMetadataFileName);
         if (!File.Exists(metadataPath))
-            return (null, 0);
+            return;
 
         List<string> filePaths;
         try
@@ -208,43 +172,42 @@ public sealed class ModScanner
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            return (null, 0);
+            return;
         }
 
         if (filePaths.Count == 0)
-            return (null, 0);
+            return;
 
-        const string optionsPrefix = OptionsDirectoryName + "/";
-        var maxSegments = 0;
+        var twoLevel = options.Any(o => o.RelativePath.StartsWith("Options/", StringComparison.Ordinal)
+            && o.RelativePath["Options/".Length..].Contains('/'));
+
+        var existing = new HashSet<string>(options.Select(o => o.RelativePath), StringComparer.OrdinalIgnoreCase);
+        const string optionsPrefix = "Options/";
+
         foreach (var relative in filePaths)
         {
             var normalized = relative.Replace('\\', '/');
             if (!normalized.StartsWith(optionsPrefix, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            var segmentCount = normalized[optionsPrefix.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries).Length;
-            maxSegments = Math.Max(maxSegments, segmentCount);
-        }
-
-        // Determine option depth dynamically based on file path depth
-        var optionDepth = maxSegments > 2 ? maxSegments - 1 : 1;
-
-        var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var relative in filePaths)
-        {
-            var normalized = relative.Replace('\\', '/');
-            if (!normalized.StartsWith(optionsPrefix, StringComparison.OrdinalIgnoreCase))
+            var segments = normalized[optionsPrefix.Length..].Split('/');
+            var candidate = twoLevel
+                ? segments.Length >= 2 ? string.Join('/', segments.Take(2)) : null
+                : segments.Length >= 1 ? segments[0] : null;
+            if (candidate is null)
                 continue;
 
-            var segments = normalized[optionsPrefix.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries);
-            if (segments.Length == 0)
+            var relativePath = optionsPrefix + candidate;
+            if (!existing.Add(relativePath))
                 continue;
 
-            var takeCount = Math.Min(optionDepth, segments.Length);
-            declared.Add(optionsPrefix + string.Join('/', segments.Take(takeCount)));
+            options.Add(new ModOption
+            {
+                Name = candidate.Split('/')[^1],
+                Directory = Path.Combine(optionsRoot, candidate),
+                RelativePath = relativePath,
+            });
         }
-
-        return (declared, optionDepth);
     }
 
     private static List<string> ReadUpdateMetadataFilePaths(string path)
@@ -266,13 +229,21 @@ public sealed class ModScanner
         return result;
     }
 
-    private void ScanOptionLevel(
+    /// <summary>
+    /// Walks the Options/ tree looking for the folders that should actually be
+    /// exposed as toggles. A folder is treated as an option (a "boundary") and
+    /// NOT explored further as soon as either it has no subdirectories at all,
+    /// or one of its immediate children is the start of the game's own content
+    /// structure (see <see cref="IsGameContentRoot"/>) - e.g. a "BASE.CPK"
+    /// archive folder or a "BUSTUP"/"MODEL"/etc. top-level game folder. Anything
+    /// short of that boundary (e.g. a category like "Censorship" that only
+    /// contains further named option folders) is a grouping folder and is
+    /// recursed into, but never added as a toggle itself.
+    /// </summary>
+    private void ScanOptionDirectories(
         string directory,
         string canonicalDirectory,
         string optionsRoot,
-        int depth,
-        int optionDepth,
-        HashSet<string>? declared,
         List<ModOption> options,
         List<ScanIssue> issues)
     {
@@ -281,9 +252,9 @@ public sealed class ModScanner
         {
             subdirectories = Directory.EnumerateDirectories(directory);
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
+        catch (UnauthorizedAccessException)
         {
-            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, directory, "permission denied or I/O error reading Options/"));
+            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, directory, "permission denied reading Options/"));
             return;
         }
 
@@ -291,49 +262,75 @@ public sealed class ModScanner
         {
             var rawName = Path.GetFileName(subdir);
             var (name, _) = NormalizeDisabledDirectory(rawName, subdir);
+
+            // Rebuild the canonical path from the canonical parent so a .disabled
+            // folder along the chain (e.g. Options/Censorship.disabled/Ryuji Shoes)
+            // doesn't leak the suffix into the logical option path.
             var canonicalPath = Path.Combine(canonicalDirectory, name);
 
-            // Determine if this directory contains actual files or matches an option leaf
-            bool hasFiles = false;
-            try
+            if (IsOptionBoundary(subdir, issues))
             {
-                hasFiles = Directory.EnumerateFiles(subdir, "*.*", SearchOption.AllDirectories)
-                    .Any(f => !Path.GetFileName(f).Equals(UpdateMetadataFileName, StringComparison.OrdinalIgnoreCase));
-            }
-            catch
-            {
-            }
-
-            bool isOptionLevel = (optionDepth > 0 && depth + 1 >= optionDepth) || !hasFiles || Directory.EnumerateDirectories(subdir).Any(d => 
-            {
-                var subName = Path.GetFileName(d);
-                var (normSubName, _) = NormalizeDisabledDirectory(subName, d);
-                return s_ignoredContentFolders.Contains(normSubName);
-            });
-
-            // If it has files directly or hits the target option depth without further sub-options
-            if (depth + 1 >= (optionDepth == 0 ? 1 : optionDepth) || (hasFiles && !Directory.EnumerateDirectories(subdir).Any(d => !Path.GetFileName(d).EndsWith(".disabled", StringComparison.OrdinalIgnoreCase) && Directory.EnumerateFiles(d, "*.*", SearchOption.AllDirectories).Any())))
-            {
-                var relFromRoot = Path.GetRelativePath(optionsRoot, canonicalPath);
-                var checkPath = $"{OptionsDirectoryName}/{relFromRoot.Replace(Path.DirectorySeparatorChar, '/')}";
-
-                if (declared is null || declared.Count == 0 || declared.Contains(checkPath) || declared.Any(d => d.StartsWith(checkPath, StringComparison.OrdinalIgnoreCase)))
+                // This folder IS the toggle (e.g. Options/Censorship/Ryuji Shoes).
+                // Stop here - everything below is the mod's own payload
+                // (BASE.CPK/MODEL/..., BUSTUP/..., etc.), not more options.
+                // Relative paths are always built with '/' so later string
+                // comparisons (e.g. in MergeUpdateMetadataOptions) are reliable
+                // regardless of the OS's native path separator.
+                var relativePath = Path.GetRelativePath(optionsRoot, canonicalPath).Replace('\\', '/');
+                options.Add(new ModOption
                 {
-                    options.Add(new ModOption
-                    {
-                        Name = name,
-                        Directory = canonicalPath,
-                        RelativePath = Path.Combine(OptionsDirectoryName, relFromRoot),
-                    });
-                }
+                    Name = name,
+                    Directory = canonicalPath,
+                    RelativePath = $"{OptionsDirectoryName}/{relativePath}",
+                });
             }
             else
             {
-                ScanOptionLevel(subdir, canonicalPath, optionsRoot, depth + 1, optionDepth, declared, options, issues);
+                // Grouping folder (e.g. a category) - keep looking underneath it.
+                ScanOptionDirectories(subdir, canonicalPath, optionsRoot, options, issues);
             }
         }
     }
 
+    /// <summary>
+    /// True when <paramref name="subdir"/> should be exposed as a toggle rather
+    /// than explored further: either it has no subdirectories at all (a bare,
+    /// flat option), or one of its immediate children marks the start of the
+    /// game's own content structure - in which case <paramref name="subdir"/>
+    /// itself is the option, and its contents are the payload, not more options.
+    /// </summary>
+    private bool IsOptionBoundary(string subdir, List<ScanIssue> issues)
+    {
+        List<string> children;
+        try
+        {
+            children = Directory.EnumerateDirectories(subdir).ToList();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, subdir, "permission denied reading Options/"));
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+
+        if (children.Count == 0)
+            return true;
+
+        return children.Any(child => IsGameContentRoot(Path.GetFileName(child) ?? string.Empty));
+    }
+
+    /// <summary>
+    /// Detects content subdirectories at the mod's root level — folders that
+    /// don't have a ModConfig.json and don't contain DLLs. Mods like
+    /// p5rpc.texturefixesproject ship texture packs as subdirectories (e.g.
+    /// BetterJokerTycoonPortrait/) that users want to toggle on/off.
+    /// Directories named Options, Cache, x86, x64, or starting with _
+    /// are excluded. Directories ending with .disabled are mapped back to
+    /// their original name.
+    /// </summary>
     private IReadOnlyList<ModOption> ScanContentSubModules(string modDirectory, List<ScanIssue> issues)
     {
         var options = new List<ModOption>();
@@ -342,7 +339,7 @@ public sealed class ModScanner
         {
             subdirectories = Directory.EnumerateDirectories(modDirectory);
         }
-        catch (Exception)
+        catch (UnauthorizedAccessException)
         {
             return [];
         }
@@ -352,33 +349,36 @@ public sealed class ModScanner
             var rawName = Path.GetFileName(subdir);
             var (name, canonicalPath) = NormalizeDisabledDirectory(rawName, subdir);
 
-            if (s_ignoredContentFolders.Contains(name) || name.StartsWith('_') || name.StartsWith('.'))
+            // Skip well-known non-content directories.
+            if (name.Equals(OptionsDirectoryName, StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("Cache", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("x86", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("x64", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith('_'))
                 continue;
 
-            if (name.Contains(".BIN", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains(".CPK", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains(".PAC", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains(".ARC", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains(".AWB", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains(".ACB", StringComparison.OrdinalIgnoreCase))
+            // Use the actual on-disk path for filesystem checks (the canonical
+            // path may not exist if the dir is .disabled).
+            var diskPath = subdir;
+
+            // Skip directories that have a ModConfig.json (those are nested mods, not content).
+            if (File.Exists(Path.Combine(diskPath, ModManifest.FileName)))
                 continue;
 
-            if (File.Exists(Path.Combine(subdir, ModManifest.FileName)))
-                continue;
-
+            // Skip directories that contain DLLs (those are dependency folders, not content).
             bool hasDlls;
             try
             {
-                hasDlls = Directory.EnumerateFiles(subdir, "*.dll").Any();
+                hasDlls = Directory.EnumerateFiles(diskPath, "*.dll").Any();
             }
-            catch
+            catch (IOException)
             {
                 continue;
             }
-
             if (hasDlls)
                 continue;
 
+            // This looks like a content sub-module (e.g. texture pack folder).
             options.Add(new ModOption
             {
                 Name = name,
@@ -390,6 +390,12 @@ public sealed class ModScanner
         return options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>
+    /// Strips the .disabled suffix from a directory name so the scanner maps
+    /// renamed (disabled) directories back to their original option identity.
+    /// Always returns the canonical (non-.disabled) directory path so that
+    /// OptionStateHealer can derive the correct .disabled path.
+    /// </summary>
     private static (string Name, string Directory) NormalizeDisabledDirectory(string rawName, string fullPath)
     {
         const string disabledSuffix = ".disabled";
