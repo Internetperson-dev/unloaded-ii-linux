@@ -81,7 +81,7 @@ mkdir -p "$STAGE/reloaded-dropin"/{loader,bootstrap,logs} "$STAGE/mods"
 
 # Proxy DLL: Ultimate ASI Loader x64 under the chosen proxy name.
 TMP_ASI="$(mktemp -d)"
-7zz e -y -o"$TMP_ASI" "$VENDOR/extracted/Loader/Asi/UltimateAsiLoader.7z" ASILoader64.dll > /dev/null
+7z e -y -o"$TMP_ASI" "$VENDOR/extracted/Loader/Asi/UltimateAsiLoader.7z" ASILoader64.dll > /dev/null
 cp "$TMP_ASI/ASILoader64.dll" "$STAGE/$PROXY_NAME"
 rm -rf "$TMP_ASI"
 
