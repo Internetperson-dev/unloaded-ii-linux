@@ -151,6 +151,9 @@ public sealed class ModCatalog(string gameDirectory)
             : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
     }
 
+    private const string P5RModLoaderId = "p5rpc.modloader";
+    private const string SkipIntroOptionRelativePath = "__builtin/skip-intro";
+
     /// <summary>Persists current toggle states to the overrides file sync reads.</summary>
     public void SaveToggles()
     {
@@ -163,12 +166,42 @@ public sealed class ModCatalog(string gameDirectory)
             }
         }
 
-        new OverlayOverrides
+        var overrides = new OverlayOverrides
         {
             DisabledMods = [.. Mods.Where(m => !m.Enabled && !m.IsBaseMod).Select(m => m.ModId)],
             DisabledOptions = [.. disabledOptions],
             HideWatermark = HideWatermark,
-        }.Save(DropInDirectory);
+        };
+        overrides.Save(DropInDirectory);
+
+        SyncP5RModLoaderSkipIntroConfig(overrides);
+    }
+
+    private void SyncP5RModLoaderSkipIntroConfig(OverlayOverrides overrides)
+    {
+        var mod = Mods.FirstOrDefault(m => m.ModId.Equals(P5RModLoaderId, StringComparison.OrdinalIgnoreCase));
+        if (mod is null || mod.UserConfig is null || mod.UserConfigPath is null)
+            return;
+
+        var option = mod.Options.FirstOrDefault(o => o.RelativePath == SkipIntroOptionRelativePath);
+        if (option is null)
+            return;
+
+        var isDisabled = overrides.IsOptionDisabled(P5RModLoaderId, SkipIntroOptionRelativePath);
+        var introSkipValue = !isDisabled;
+
+        var p5rConfig = mod.UserConfig["P5RConfig"] as JsonObject;
+        if (p5rConfig is null)
+        {
+            p5rConfig = new JsonObject();
+            mod.UserConfig["P5RConfig"] = p5rConfig;
+        }
+
+        p5rConfig["IntroSkip"] = introSkipValue;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(mod.UserConfigPath)!);
+        File.WriteAllText(mod.UserConfigPath,
+            mod.UserConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
     }
 
     private string ReadDropInVersion()
