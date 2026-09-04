@@ -1,4 +1,6 @@
 using System.Text.Json;
+using p5rpc.modloader.Patches.Common;
+using Reloaded.Memory.Sources;
 using ReloadedDropIn.Core.Manifests;
 
 namespace ReloadedDropIn.Core.Discovery;
@@ -43,6 +45,26 @@ public sealed class ModScanner
         directoryName.EndsWith(".CPK", StringComparison.OrdinalIgnoreCase)
         || GameContentRootNames.Contains(directoryName);
 
+    /// <summary>
+    /// ModId of the built-in "Skip Intro" toggle. It isn't backed by a real
+    /// mod folder on disk - <see cref="CreateBuiltInMods"/> synthesizes a
+    /// <see cref="DiscoveredMod"/> for it so it lists, toggles, and persists
+    /// exactly like any other mod, and <see cref="ApplySkipIntroPatch"/>
+    /// re-implements the byte patch a dedicated "Intro Skip" mod would apply,
+    /// gated on whether this synthetic mod is enabled.
+    /// </summary>
+    public const string SkipIntroModId = "p5rpc.builtin.skipintro";
+
+    private const string SkipIntroManifestJson = """
+        {
+          "ModId": "p5rpc.builtin.skipintro",
+          "ModName": "Skip Intro",
+          "ModAuthor": "Built-in",
+          "ModVersion": "1.0.0",
+          "ModDescription": "Skips the game's introduction video on boot."
+        }
+        """;
+
     public ScanResult Scan(string modsDirectory)
     {
         var mods = new List<DiscoveredMod>();
@@ -58,6 +80,7 @@ public sealed class ModScanner
         }
 
         ScanDirectory(modsDirectory, depth: 0, mods, issues);
+        mods.AddRange(CreateBuiltInMods(modsDirectory, issues));
 
         // Deterministic order: sort candidates by directory path, then keep the first
         // occurrence of each ModId so duplicate resolution never depends on OS enumeration order.
@@ -84,6 +107,57 @@ public sealed class ModScanner
             Mods = unique.OrderBy(m => m.ModId, StringComparer.OrdinalIgnoreCase).ToList(),
             Issues = issues,
         };
+    }
+
+    /// <summary>
+    /// Produces mods that aren't real folders under mods/ but should still
+    /// show up in the list and be toggleable the same way a real mod is -
+    /// currently just "Skip Intro". Parsed through the same
+    /// <see cref="ModManifest.TryParse"/> path as an on-disk ModConfig.json so
+    /// it behaves identically to a real manifest (same validation, same
+    /// shape) even though nothing was read from disk.
+    /// </summary>
+    private static IEnumerable<DiscoveredMod> CreateBuiltInMods(string modsDirectory, List<ScanIssue> issues)
+    {
+        var manifest = ModManifest.TryParse(SkipIntroManifestJson, out var error);
+        if (manifest is null)
+        {
+            // Should never happen - the JSON above is fixed - but report it
+            // rather than silently dropping the built-in option if it does.
+            issues.Add(new ScanIssue(ScanIssueKind.InvalidManifest, "<built-in:SkipIntro>", error!));
+            yield break;
+        }
+
+        // No real directory backs this mod; use a clearly-synthetic path
+        // (nested under mods/) so it sorts predictably and never collides
+        // with a real mod's directory in the duplicate-ModId check.
+        var syntheticDirectory = Path.Combine(modsDirectory, "__builtin__", "SkipIntro");
+
+        yield return new DiscoveredMod
+        {
+            Manifest = manifest,
+            Directory = syntheticDirectory,
+            Options = [],
+        };
+    }
+
+    /// <summary>
+    /// Re-creates the effect of a dedicated "Intro Skip" mod for users who
+    /// only have the built-in <see cref="SkipIntroModId"/> toggle enabled
+    /// rather than a real mod installed. The loader should call this once per
+    /// game launch, after resolving whether that toggle is enabled (the same
+    /// way it resolves any other mod's enabled/disabled state), instead of
+    /// relying on a mod's own ModConfig to gate the patch.
+    /// </summary>
+    public static void ApplySkipIntroPatch(in PatchContext context, bool enabled)
+    {
+        if (!enabled)
+            return;
+
+        var baseAddr = context.BaseAddress;
+        context.ScanHelper.FindPatternOffset("74 10 C7 ?? 0C 00 00 00", (offset) =>
+            Memory.Instance.SafeWriteRaw((nuint)(baseAddr + offset), new byte[] { 0x90, 0x90 }),
+            "Introduction Skip (built-in)");
     }
 
     private void ScanDirectory(string directory, int depth, List<DiscoveredMod> mods, List<ScanIssue> issues)
