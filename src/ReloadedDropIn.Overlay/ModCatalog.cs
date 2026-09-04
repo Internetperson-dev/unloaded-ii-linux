@@ -80,6 +80,13 @@ public sealed class ModCatalog(string gameDirectory)
         HideWatermark = overrides.HideWatermark;
         DropInVersion = ReadDropInVersion();
         ReadUpdateCheck();
+
+        // Ensure Skip Intro defaults to OFF (disabled) for p5rpc.modloader
+        // if no override exists yet and no user config has been created.
+        EnsureP5RModLoaderSkipIntroDefault(overrides, out var overridesChanged);
+        if (overridesChanged)
+            overrides.Save(DropInDirectory);
+
         var scan = new ModScanner().Scan(ModsDirectory);
 
         foreach (var mod in scan.Mods)
@@ -109,6 +116,18 @@ public sealed class ModCatalog(string gameDirectory)
             var userConfig = TryLoadConfig(configPath)
                 ?? TryLoadConfig(Path.Combine(mod.Directory, "Config.json"));
 
+            // For p5rpc.modloader, ensure P5RConfig.IntroSkip defaults to false
+            // if no user config exists yet.
+            if (mod.ModId.Equals(P5RModLoaderId, StringComparison.OrdinalIgnoreCase)
+                && userConfig is null
+                && !File.Exists(configPath))
+            {
+                userConfig = new JsonObject
+                {
+                    ["P5RConfig"] = new JsonObject { ["IntroSkip"] = false }
+                };
+            }
+
             if (userConfig is null && modDllPath is not null)
             {
                 try
@@ -128,6 +147,22 @@ public sealed class ModCatalog(string gameDirectory)
                     }
                 }
                 catch { /* DLL inspection can fail on arch mismatch etc. — skip silently. */ }
+            }
+
+            // For p5rpc.modloader, ensure P5RConfig.IntroSkip exists and defaults to false
+            if (mod.ModId.Equals(P5RModLoaderId, StringComparison.OrdinalIgnoreCase)
+                && userConfig is not null)
+            {
+                var p5rConfig = userConfig["P5RConfig"] as JsonObject;
+                if (p5rConfig is null)
+                {
+                    p5rConfig = new JsonObject();
+                    userConfig["P5RConfig"] = p5rConfig;
+                }
+                if (!p5rConfig.ContainsKey("IntroSkip"))
+                {
+                    p5rConfig["IntroSkip"] = false;
+                }
             }
 
             Mods.Add(new CatalogMod
@@ -153,6 +188,30 @@ public sealed class ModCatalog(string gameDirectory)
 
     private const string P5RModLoaderId = "p5rpc.modloader";
     private const string SkipIntroOptionRelativePath = "__builtin/skip-intro";
+
+    private void EnsureP5RModLoaderSkipIntroDefault(OverlayOverrides overrides, out bool changed)
+    {
+        changed = false;
+        var configPath = Path.Combine(UserConfigRoot, P5RModLoaderId, "Config.json");
+
+        // If user config already exists, respect it (don't override user's choice)
+        if (File.Exists(configPath))
+            return;
+
+        // If override already exists for this option, respect it
+        if (overrides.IsOptionDisabled(P5RModLoaderId, SkipIntroOptionRelativePath))
+            return;
+
+        // Default to disabled (OFF) - add to overrides
+        var disabledOptions = overrides.DisabledOptions.ToList();
+        var key = $"{P5RModLoaderId}:{SkipIntroOptionRelativePath}";
+        if (!disabledOptions.Contains(key, StringComparer.OrdinalIgnoreCase))
+        {
+            disabledOptions.Add(key);
+            overrides.DisabledOptions = [.. disabledOptions];
+            changed = true;
+        }
+    }
 
     /// <summary>Persists current toggle states to the overrides file sync reads.</summary>
     public void SaveToggles()
