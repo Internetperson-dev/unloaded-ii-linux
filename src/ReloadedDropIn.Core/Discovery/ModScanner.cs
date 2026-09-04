@@ -205,14 +205,14 @@ private static ModOption CreateSkipIntroOption()
     {
         Name = SkipIntroOptionName,
 
-        // Built-in runtime option; no real filesystem directory is used.
-        // The special RelativePath identifies this option to the runtime layer.
+        // Built-in runtime option. This path must never be touched by
+        // OptionStateHealer; it exists only as an option identity.
         Directory = string.Empty,
 
+        // Stable key used by the overlay/state system.
         RelativePath = $"__builtin/{SkipIntroOptionId}",
     };
 }
-
     /// <summary>
     /// Scans for sub-module options inside a mod's Options/ directory.
     /// The tree is walked recursively, so option folders nested several levels
