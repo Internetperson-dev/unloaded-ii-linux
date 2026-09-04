@@ -126,15 +126,13 @@ public sealed class ModScanner
             return [];
 
         var options = new List<ModOption>();
-        var declared = ReadUpdateMetadataOptionPaths(modDirectory);
+        var (declared, optionDepth) = ReadUpdateMetadataOptionPaths(modDirectory);
 
         // A release manifest tells us exactly how the Options/ tree is laid out
         // (one-level: Options/<option>, or two-level: Options/<category>/<option>),
         // so options can be resolved at the declared depth and stray content
         // folders can be dropped. Without a manifest we fall back to the classic
         // one-level layout where every direct child of Options/ is an option.
-        var optionDepth = declared is null ? 1 : declared.Any(p => p[(OptionsDirectoryName.Length + 1)..].Contains('/')) ? 2 : 1;
-
         ScanOptionLevel(optionsDir, canonicalDirectory: optionsDir, optionsRoot: optionsDir,
             depth: 0, optionDepth: optionDepth, declared: declared, options: options, issues: issues);
 
@@ -142,16 +140,21 @@ public sealed class ModScanner
     }
 
     /// <summary>
-    /// Reads the set of option paths declared in Sewer56.Update.Metadata.json, or
-    /// null when the mod has no (readable) manifest. Option granularity mirrors the
-    /// mod's own layout: when an option path nests further (Options/Category/Option)
-    /// the first two segments form the option; otherwise the first segment does.
+    /// Reads the set of option paths declared in Sewer56.Update.Metadata.json and
+    /// the mod's option granularity (one-level Options/&lt;option&gt; or two-level
+    /// Options/&lt;category&gt;/&lt;option&gt;), or (null, 1) when the mod has no readable
+    /// manifest. The manifest lists every file the mod ships, so the layout is
+    /// visible in the deepest declared path under Options/: a two-level option
+    /// always nests at least three segments (Options/&lt;category&gt;/&lt;option&gt;/&lt;content&gt;),
+    /// while a one-level option nests at most two (Options/&lt;option&gt;/&lt;content&gt;).
+    /// Content folders (BASE.CPK, FONT/, ...) are just deeper segments; the option
+    /// is always the first one or two segments after Options/.
     /// </summary>
-    private static HashSet<string>? ReadUpdateMetadataOptionPaths(string modDirectory)
+    private static (HashSet<string>? OptionPaths, int OptionDepth) ReadUpdateMetadataOptionPaths(string modDirectory)
     {
         var metadataPath = Path.Combine(modDirectory, UpdateMetadataFileName);
         if (!File.Exists(metadataPath))
-            return null;
+            return (null, 1);
 
         List<string> filePaths;
         try
@@ -160,16 +163,25 @@ public sealed class ModScanner
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            return null;
+            return (null, 1);
         }
 
         if (filePaths.Count == 0)
-            return null;
+            return (null, 1);
 
         const string optionsPrefix = OptionsDirectoryName + "/";
-        var twoLevel = filePaths.Any(p =>
-            p.Replace('\\', '/').StartsWith(optionsPrefix, StringComparison.OrdinalIgnoreCase) &&
-            p.Replace('\\', '/')[optionsPrefix.Length..].Contains('/'));
+        var maxSegments = 0;
+        foreach (var relative in filePaths)
+        {
+            var normalized = relative.Replace('\\', '/');
+            if (!normalized.StartsWith(optionsPrefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var segmentCount = normalized[optionsPrefix.Length..].Split('/').Length;
+            maxSegments = Math.Max(maxSegments, segmentCount);
+        }
+
+        var optionDepth = maxSegments >= 3 ? 2 : 1;
 
         var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var relative in filePaths)
@@ -179,17 +191,13 @@ public sealed class ModScanner
                 continue;
 
             var segments = normalized[optionsPrefix.Length..].Split('/');
-            if (segments.Length == 0)
+            if (segments.Length < optionDepth)
                 continue;
 
-            var optionPath = twoLevel
-                ? segments.Length >= 2 ? string.Join('/', segments.Take(2)) : null
-                : segments.Length >= 1 ? segments[0] : null;
-            if (optionPath is not null)
-                declared.Add(optionsPrefix + optionPath);
+            declared.Add(optionsPrefix + string.Join('/', segments.Take(optionDepth)));
         }
 
-        return declared;
+        return (declared, optionDepth);
     }
 
     private static List<string> ReadUpdateMetadataFilePaths(string path)
