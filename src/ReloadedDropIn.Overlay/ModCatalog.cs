@@ -5,6 +5,15 @@ using ReloadedDropIn.Core.Discovery;
 
 namespace ReloadedDropIn.Overlay;
 
+/// <summary>A toggleable sub-module option within a mod.</summary>
+public sealed record CatalogModOption
+{
+    public required string Name { get; init; }
+    public required string Directory { get; init; }
+    public required string RelativePath { get; init; }
+    public required bool Enabled { get; set; }
+}
+
 public sealed record CatalogMod
 {
     public required string ModId { get; init; }
@@ -34,6 +43,12 @@ public sealed record CatalogMod
     /// </summary>
     public IReadOnlyDictionary<string, string> ConfigDisplayNames { get; init; } =
         new Dictionary<string, string>();
+
+    /// <summary>
+    /// Sub-module options from the mod's Options/ directory.
+    /// Empty when the mod has no Options/ folder.
+    /// </summary>
+    public List<CatalogModOption> Options { get; init; } = [];
 }
 
 /// <summary>
@@ -75,6 +90,16 @@ public sealed class ModCatalog(string gameDirectory)
 
             var configPath = Path.Combine(UserConfigRoot, mod.ModId, "Config.json");
             var separator = Path.DirectorySeparatorChar;
+
+            // Build options list with enabled state from overrides.
+            var options = mod.Options.Select(o => new CatalogModOption
+            {
+                Name = o.Name,
+                Directory = o.Directory,
+                RelativePath = o.RelativePath,
+                Enabled = !overrides.IsOptionDisabled(mod.ModId, o.RelativePath),
+            }).ToList();
+
             Mods.Add(new CatalogMod
             {
                 ModId = mod.ModId,
@@ -90,6 +115,7 @@ public sealed class ModCatalog(string gameDirectory)
                     string.IsNullOrWhiteSpace(mod.Manifest.ModDll)
                         ? null
                         : Path.Combine(mod.Directory, mod.Manifest.ModDll)),
+                Options = options,
             });
         }
 
@@ -102,9 +128,19 @@ public sealed class ModCatalog(string gameDirectory)
     /// <summary>Persists current toggle states to the overrides file sync reads.</summary>
     public void SaveToggles()
     {
+        var disabledOptions = new List<string>();
+        foreach (var mod in Mods.Where(m => !m.IsBaseMod))
+        {
+            foreach (var option in mod.Options.Where(o => !o.Enabled))
+            {
+                disabledOptions.Add($"{mod.ModId}:{option.RelativePath}");
+            }
+        }
+
         new OverlayOverrides
         {
             DisabledMods = [.. Mods.Where(m => !m.Enabled && !m.IsBaseMod).Select(m => m.ModId)],
+            DisabledOptions = [.. disabledOptions],
             HideWatermark = HideWatermark,
         }.Save(DropInDirectory);
     }

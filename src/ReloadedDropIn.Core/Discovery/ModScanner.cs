@@ -15,6 +15,9 @@ public sealed class ModScanner
     /// <summary>How many directory levels below mods/ may contain a manifest.</summary>
     public int MaxDepth { get; init; } = 3;
 
+    /// <summary>Name of the directory that holds sub-module options within a mod.</summary>
+    public const string OptionsDirectoryName = "Options";
+
     public ScanResult Scan(string modsDirectory)
     {
         var mods = new List<DiscoveredMod>();
@@ -83,7 +86,10 @@ public sealed class ModScanner
                 if (manifest is null)
                     issues.Add(new ScanIssue(ScanIssueKind.InvalidManifest, manifestPath, error!));
                 else
-                    mods.Add(new DiscoveredMod { Manifest = manifest, Directory = subdirectory });
+                {
+                    var options = ScanOptions(subdirectory, issues);
+                    mods.Add(new DiscoveredMod { Manifest = manifest, Directory = subdirectory, Options = options });
+                }
 
                 // A manifest root is a leaf: don't look for nested mods inside a mod.
                 continue;
@@ -91,5 +97,43 @@ public sealed class ModScanner
 
             ScanDirectory(subdirectory, depth + 1, mods, issues);
         }
+    }
+
+    /// <summary>
+    /// Scans for sub-module options inside a mod's Options/ directory.
+    /// Each subdirectory becomes a toggleable option; directories without
+    /// a manifest are still treated as options (content-only folders).
+    /// </summary>
+    private IReadOnlyList<ModOption> ScanOptions(string modDirectory, List<ScanIssue> issues)
+    {
+        var optionsDir = Path.Combine(modDirectory, OptionsDirectoryName);
+        if (!Directory.Exists(optionsDir))
+            return [];
+
+        var options = new List<ModOption>();
+        IEnumerable<string> optionDirectories;
+        try
+        {
+            optionDirectories = Directory.EnumerateDirectories(optionsDir);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            issues.Add(new ScanIssue(ScanIssueKind.IgnoredEntry, optionsDir, "permission denied reading Options/"));
+            return [];
+        }
+
+        foreach (var optionDir in optionDirectories)
+        {
+            var optionName = Path.GetFileName(optionDir);
+            var relativePath = Path.Combine(OptionsDirectoryName, optionName);
+            options.Add(new ModOption
+            {
+                Name = optionName,
+                Directory = optionDir,
+                RelativePath = relativePath,
+            });
+        }
+
+        return options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 }

@@ -117,4 +117,74 @@ public class ModScannerTests
 
         Assert.Empty(result.Mods);
     }
+
+    [Fact]
+    public void DiscoversModOptionsFromOptionsDirectory()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/ModWithOptions", "mod.with.options");
+
+        // Create Options/ directory with subdirectories.
+        var optionsDir = Path.Combine(modDir, "Options");
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Censorship"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Almighty Skill Icon"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "Others"));
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+
+        var mod = Assert.Single(result.Mods);
+        Assert.Equal(3, mod.Options.Count);
+        Assert.Equal("Almighty Skill Icon", mod.Options[0].Name);
+        Assert.Equal("Censorship", mod.Options[1].Name);
+        Assert.Equal("Others", mod.Options[2].Name);
+    }
+
+    [Fact]
+    public void ModWithoutOptionsDirectoryHasEmptyOptions()
+    {
+        using var temp = new TempDirectory();
+        temp.CreateMod("mods/ModWithoutOptions", "mod.no.options");
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+
+        var mod = Assert.Single(result.Mods);
+        Assert.Empty(mod.Options);
+    }
+
+    [Fact]
+    public void EmptyOptionsDirectoryYieldsEmptyOptions()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/ModEmptyOptions", "mod.empty.options");
+        Directory.CreateDirectory(Path.Combine(modDir, "Options"));
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+
+        var mod = Assert.Single(result.Mods);
+        Assert.Empty(mod.Options);
+    }
+
+    [Fact]
+    public void ModWithSubModulesAndOptions()
+    {
+        using var temp = new TempDirectory();
+        var modDir = temp.CreateMod("mods/ModWithSubModules", "mod.sub.modules");
+
+        // Create Options/ directory with subdirectories.
+        var optionsDir = Path.Combine(modDir, "Options");
+        Directory.CreateDirectory(Path.Combine(optionsDir, "OptionA"));
+        Directory.CreateDirectory(Path.Combine(optionsDir, "OptionB"));
+
+        // Create another sub-module with its own manifest (should NOT be scanned as an option).
+        var subModDir = Path.Combine(modDir, "SubModule");
+        temp.CreateMod("mods/ModWithSubModules/SubModule", "sub.module");
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+
+        // Should only find the parent mod (not the sub-module inside it).
+        var mod = Assert.Single(result.Mods, m => m.ModId == "mod.sub.modules");
+        Assert.Equal(2, mod.Options.Count);
+        Assert.Equal("OptionA", mod.Options[0].Name);
+        Assert.Equal("OptionB", mod.Options[1].Name);
+    }
 }

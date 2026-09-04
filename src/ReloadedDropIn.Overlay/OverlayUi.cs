@@ -140,11 +140,32 @@ public sealed class OverlayUi(
                     RenderConfigEditor(mod);
             }
 
+            if (mod.Options.Count > 0)
+                RenderModOptions(mod);
+
             _imgui.PopId();
         }
 
         if (!any)
             _imgui.TextDisabled(baseMods ? "none" : "none yet - drop mod folders into mods/");
+    }
+
+    private void RenderModOptions(CatalogMod mod)
+    {
+        _imgui.Indent(16);
+        _imgui.TextDisabled("Options:");
+        foreach (var option in mod.Options)
+        {
+            _imgui.PushId(option.RelativePath);
+            var enabled = option.Enabled;
+            if (_imgui.Checkbox(option.Name, ref enabled))
+            {
+                option.Enabled = enabled;
+                Save(() => _catalog.SaveToggles(), "option toggles");
+            }
+            _imgui.PopId();
+        }
+        _imgui.Unindent(16);
     }
 
     private void RenderConfigEditor(CatalogMod mod)

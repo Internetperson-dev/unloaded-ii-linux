@@ -12,6 +12,12 @@ public sealed record OverlayOverrides
 {
     public string[] DisabledMods { get; init; } = [];
 
+    /// <summary>
+    /// Disabled sub-module options in "ModId:RelativePath" format (e.g.
+    /// "p5rpc.misc.ps4reverts:Options/Censorship").
+    /// </summary>
+    public string[] DisabledOptions { get; init; } = [];
+
     /// <summary>Hides the corner watermark drawn by the overlay mod.</summary>
     public bool HideWatermark { get; init; }
 
@@ -41,4 +47,10 @@ public sealed record OverlayOverrides
 
     public bool IsDisabled(string modId) =>
         DisabledMods.Contains(modId, StringComparer.OrdinalIgnoreCase);
+
+    public bool IsOptionDisabled(string modId, string relativePath)
+    {
+        var key = $"{modId}:{relativePath}";
+        return DisabledOptions.Contains(key, StringComparer.OrdinalIgnoreCase);
+    }
 }

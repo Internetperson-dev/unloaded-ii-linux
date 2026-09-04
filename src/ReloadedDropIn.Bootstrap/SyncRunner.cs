@@ -194,6 +194,14 @@ public sealed class SyncRunner
             Log($"enabled mods ({plan.EnabledMods.Length}): {string.Join(", ", plan.EnabledMods)}");
             lastEnabledMods = plan.EnabledMods;
 
+            // Apply sub-module option states (enable/disable option directories).
+            foreach (var line in new OptionStateHealer().Reconcile(
+                         context.ModsDirectory,
+                         context.DropInDirectory,
+                         scan.Mods,
+                         overrides.DisabledOptions))
+                Log($"option: {line}");
+
             // A removed/toggled mod can leave loader-owned merged or converted
             // files behind even though AppConfig is now correct. Invalidate only
             // adapter-declared disposable state when the ordered mod set changes.
