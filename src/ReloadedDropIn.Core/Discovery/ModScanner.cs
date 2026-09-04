@@ -1,4 +1,3 @@
-csharp
 using System.Text.Json;
 using ReloadedDropIn.Core.Manifests;
 
