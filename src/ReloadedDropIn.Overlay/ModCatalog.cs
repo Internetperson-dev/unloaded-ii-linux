@@ -111,19 +111,23 @@ public sealed class ModCatalog(string gameDirectory)
 
             if (userConfig is null && modDllPath is not null)
             {
-                var dllConfig = ModConfigMetadata.ReadDefaultConfig(modDllPath);
-                if (dllConfig is not null && dllConfig.Count > 0)
+                try
                 {
-                    userConfig = dllConfig;
-                    // Persist the seeded config so future reads don't need the DLL.
-                    try
+                    var dllConfig = ModConfigMetadata.ReadDefaultConfig(modDllPath);
+                    if (dllConfig is not null && dllConfig.Count > 0)
                     {
-                        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-                        File.WriteAllText(configPath,
-                            dllConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                        userConfig = dllConfig;
+                        // Persist the seeded config so future reads don't need the DLL.
+                        try
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+                            File.WriteAllText(configPath,
+                                dllConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                        }
+                        catch { /* best-effort */ }
                     }
-                    catch { /* best-effort */ }
                 }
+                catch { /* DLL inspection can fail on arch mismatch etc. — skip silently. */ }
             }
 
             Mods.Add(new CatalogMod

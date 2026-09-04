@@ -165,7 +165,7 @@ public sealed class ModScanner
         foreach (var subdir in subdirectories)
         {
             var rawName = Path.GetFileName(subdir);
-            var (name, dirPath) = NormalizeDisabledDirectory(rawName, subdir);
+            var (name, canonicalPath) = NormalizeDisabledDirectory(rawName, subdir);
 
             // Skip well-known non-content directories.
             if (name.Equals(OptionsDirectoryName, StringComparison.OrdinalIgnoreCase) ||
@@ -175,19 +175,32 @@ public sealed class ModScanner
                 name.StartsWith('_'))
                 continue;
 
+            // Use the actual on-disk path for filesystem checks (the canonical
+            // path may not exist if the dir is .disabled).
+            var diskPath = subdir;
+
             // Skip directories that have a ModConfig.json (those are nested mods, not content).
-            if (File.Exists(Path.Combine(dirPath, ModManifest.FileName)))
+            if (File.Exists(Path.Combine(diskPath, ModManifest.FileName)))
                 continue;
 
             // Skip directories that contain DLLs (those are dependency folders, not content).
-            if (Directory.EnumerateFiles(dirPath, "*.dll").Any())
+            bool hasDlls;
+            try
+            {
+                hasDlls = Directory.EnumerateFiles(diskPath, "*.dll").Any();
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            if (hasDlls)
                 continue;
 
             // This looks like a content sub-module (e.g. texture pack folder).
             options.Add(new ModOption
             {
                 Name = name,
-                Directory = dirPath,
+                Directory = canonicalPath,
                 RelativePath = name,
             });
         }
