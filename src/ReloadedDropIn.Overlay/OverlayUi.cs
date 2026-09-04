@@ -203,11 +203,11 @@ public sealed class OverlayUi(
             if (property.Value is JsonObject nestedObj)
             {
                 // Nested config section (e.g. ConfigCommon, ConfigP5R).
-                // Use a tree node so it collapses neatly.
-                if (_imgui.TreeNode($"{label}###{property.Key}-tree"))
+                if (_imgui.CollapsingHeader($"{label}###{property.Key}-section", TreeDefaultOpen))
                 {
+                    _imgui.Indent(16);
                     RenderConfigProperties(nestedObj, mod, ref changed);
-                    _imgui.TreePop();
+                    _imgui.Unindent(16);
                 }
             }
             else if (property.Value is JsonValue value)
