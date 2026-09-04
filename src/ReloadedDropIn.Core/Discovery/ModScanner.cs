@@ -115,12 +115,13 @@ public sealed class ModScanner
             return [];
 
         var options = new List<ModOption>();
-        ScanOptionDirectories(optionsDir, optionsDir, options, issues);
+        ScanOptionDirectories(optionsDir, canonicalDirectory: optionsDir, optionsRoot: optionsDir, options, issues);
         return options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private void ScanOptionDirectories(
         string directory,
+        string canonicalDirectory,
         string optionsRoot,
         List<ModOption> options,
         List<ScanIssue> issues)
@@ -139,12 +140,17 @@ public sealed class ModScanner
         foreach (var subdir in subdirectories)
         {
             var rawName = Path.GetFileName(subdir);
-            var (name, canonicalPath) = NormalizeDisabledDirectory(rawName, subdir);
+            var (name, _) = NormalizeDisabledDirectory(rawName, subdir);
+
+            // Rebuild the canonical path from the canonical parent so a .disabled
+            // folder along the chain (e.g. Options/Censorship.disabled/Ryuji Shoes)
+            // doesn't leak the suffix into the logical option path.
+            var canonicalPath = Path.Combine(canonicalDirectory, name);
 
             // Recurse first so nested option folders are discovered regardless
             // of whether this directory is itself exposed as a toggle. Use the
             // on-disk path so a .disabled parent is still explored.
-            ScanOptionDirectories(subdir, optionsRoot, options, issues);
+            ScanOptionDirectories(subdir, canonicalPath, optionsRoot, options, issues);
 
             // Grouping folders (contain further subdirectories) are not toggles.
             bool hasChildren;
