@@ -15,9 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read version
+      - name: Generate version tag
         id: version
-        run: echo "tag=v$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+        run: |
+          BASE="$(tr -d '[:space:]' < VERSION)"
+          echo "tag=v${BASE}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "base=v${BASE}" >> "$GITHUB_OUTPUT"
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
