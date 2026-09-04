@@ -133,7 +133,7 @@ public sealed class ModScanner
         // so options can be resolved at the declared depth and stray content
         // folders can be dropped. Without a manifest we fall back to the classic
         // one-level layout where every direct child of Options/ is an option.
-        var optionDepth = declared is null ? 1 : declared.Any(p => p[OptionsDirectoryName.Length + 1..].Contains('/')) ? 2 : 1;
+        var optionDepth = declared is null ? 1 : declared.Any(p => p[(OptionsDirectoryName.Length + 1)..].Contains('/')) ? 2 : 1;
 
         ScanOptionLevel(optionsDir, canonicalDirectory: optionsDir, optionsRoot: optionsDir,
             depth: 0, optionDepth: optionDepth, declared: declared, options: options, issues: issues);
