@@ -90,11 +90,10 @@ public sealed class ModScanner
                     var options = ScanOptions(subdirectory, issues);
                     mods.Add(new DiscoveredMod { Manifest = manifest, Directory = subdirectory, Options = options });
                 }
-
-                // A manifest root is a leaf: don't look for nested mods inside a mod.
-                continue;
             }
 
+            // Always recurse: some mods contain nested mods in subdirectories
+            // (e.g. texturefixesproject has sub-mods with their own ModConfig.json).
             ScanDirectory(subdirectory, depth + 1, mods, issues);
         }
     }

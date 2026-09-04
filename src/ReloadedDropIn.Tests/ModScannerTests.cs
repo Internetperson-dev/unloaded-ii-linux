@@ -96,7 +96,7 @@ public class ModScannerTests
     }
 
     [Fact]
-    public void DoesNotScanInsideAManifestRoot()
+    public void DoesScanInsideAManifestRoot()
     {
         using var temp = new TempDirectory();
         temp.CreateMod("mods/Outer", "outer.mod");
@@ -104,7 +104,7 @@ public class ModScannerTests
 
         var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
 
-        Assert.Equal(["outer.mod"], result.Mods.Select(m => m.ModId));
+        Assert.Equal(["nested.mod", "outer.mod"], result.Mods.Select(m => m.ModId));
     }
 
     [Fact]

@@ -181,71 +181,78 @@ public sealed class OverlayUi(
     {
         var config = mod.UserConfig!;
         _imgui.Indent(16);
-        var changed = false;
+        RenderConfigProperties(config, mod, ref _configChanged);
+        _imgui.Unindent(16);
 
-        foreach (var property in config.ToList())
+        if (_configChanged)
+            Save(() => _catalog.SaveConfig(mod), $"config for {mod.ModId}");
+        _configChanged = false;
+    }
+
+    private bool _configChanged;
+
+    private void RenderConfigProperties(JsonObject obj, CatalogMod mod, ref bool changed)
+    {
+        foreach (var property in obj.ToList())
         {
-            if (property.Value is not JsonValue value)
-                continue;
-
-            // Prefer the mod's [Display(Name)] label; the "##key" suffix keeps the
-            // ImGui ID unique and stable even if two settings share a display name.
             var label = mod.ConfigDisplayNames.TryGetValue(property.Key, out var displayName)
                 && !string.IsNullOrWhiteSpace(displayName)
                     ? $"{displayName}##{property.Key}"
                     : property.Key;
 
-            if (value.TryGetValue<bool>(out var boolValue))
+            if (property.Value is JsonObject nestedObj)
             {
-                if (_imgui.Checkbox(label, ref boolValue))
+                // Nested config section (e.g. ConfigCommon, ConfigP5R).
+                // Use a tree node so it collapses neatly.
+                if (_imgui.TreeNode($"{label}###{property.Key}-tree"))
                 {
-                    config[property.Key] = boolValue;
-                    changed = true;
+                    RenderConfigProperties(nestedObj, mod, ref changed);
+                    _imgui.TreePop();
                 }
             }
-            else if (value.TryGetValue<long>(out var longValue))
+            else if (property.Value is JsonValue value)
             {
-                // Integer-valued field: keep it integral so mods with int
-                // config properties can still deserialize the file.
-                // Clamp to int range: InputInt uses a 32-bit ref, and mod
-                // configs with large longs would silently truncate otherwise.
-                var intValue = (int)Math.Clamp(longValue, int.MinValue, int.MaxValue);
-                if (_imgui.InputInt(label, ref intValue))
+                if (value.TryGetValue<bool>(out var boolValue))
                 {
-                    config[property.Key] = (long)intValue;
-                    changed = true;
+                    if (_imgui.Checkbox(label, ref boolValue))
+                    {
+                        obj[property.Key] = boolValue;
+                        changed = true;
+                    }
                 }
-            }
-            else if (value.TryGetValue<double>(out var numberValue))
-            {
-                // Floating-point field (also catches JSON numbers like 1.5
-                // that don't match the long branch above).
-                if (_imgui.InputDouble(label, ref numberValue))
+                else if (value.TryGetValue<long>(out var longValue))
                 {
-                    config[property.Key] = numberValue;
-                    changed = true;
+                    var intValue = (int)Math.Clamp(longValue, int.MinValue, int.MaxValue);
+                    if (_imgui.InputInt(label, ref intValue))
+                    {
+                        obj[property.Key] = (long)intValue;
+                        changed = true;
+                    }
                 }
-            }
-            else if (value.TryGetValue<string>(out var stringValue))
-            {
-                var buffer = new byte[256];
-                var bytes = Encoding.UTF8.GetBytes(stringValue);
-                Array.Copy(bytes, buffer, Math.Min(bytes.Length, buffer.Length - 1));
-                var edited = _imgui.InputText(label, buffer);
+                else if (value.TryGetValue<double>(out var numberValue))
+                {
+                    if (_imgui.InputDouble(label, ref numberValue))
+                    {
+                        obj[property.Key] = numberValue;
+                        changed = true;
+                    }
+                }
+                else if (value.TryGetValue<string>(out var stringValue))
+                {
+                    var buffer = new byte[256];
+                    var bytes = Encoding.UTF8.GetBytes(stringValue);
+                    Array.Copy(bytes, buffer, Math.Min(bytes.Length, buffer.Length - 1));
+                    var edited = _imgui.InputText(label, buffer);
 
-                if (edited)
-                {
-                    var terminator = Array.IndexOf(buffer, (byte)0);
-                    config[property.Key] = Encoding.UTF8.GetString(buffer, 0, terminator < 0 ? buffer.Length : terminator);
-                    changed = true;
+                    if (edited)
+                    {
+                        var terminator = Array.IndexOf(buffer, (byte)0);
+                        obj[property.Key] = Encoding.UTF8.GetString(buffer, 0, terminator < 0 ? buffer.Length : terminator);
+                        changed = true;
+                    }
                 }
             }
         }
-
-        if (changed)
-            Save(() => _catalog.SaveConfig(mod), $"config for {mod.ModId}");
-
-        _imgui.Unindent(16);
     }
 
     /// <summary>
