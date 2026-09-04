@@ -63,7 +63,7 @@ public sealed class ModScanner
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception) when (true)
         {
             issues.Add(new ScanIssue(
                 ScanIssueKind.IgnoredEntry,
@@ -120,10 +120,7 @@ public sealed class ModScanner
         {
             subdirectories = Directory.EnumerateDirectories(directory);
         }
-        catch (Exception ex) when (
-            ex is UnauthorizedAccessException or
-            IOException or
-            DirectoryNotFoundException)
+        catch (Exception) when (true)
         {
             issues.Add(new ScanIssue(
                 ScanIssueKind.IgnoredEntry,
@@ -228,8 +225,6 @@ public sealed class ModScanner
         }
         catch
         {
-            // ConfigurableOptions is optional. Invalid JSON here should not
-            // prevent the regular manifest from being discovered.
         }
 
         return result;
@@ -307,26 +302,13 @@ public sealed class ModScanner
                 continue;
             }
 
-            var segmentCount =
+            var segments =
                 normalized[optionsPrefix.Length..]
-                    .Split('/', StringSplitOptions.RemoveEmptyEntries)
-                    .Length;
+                    .Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-            maxSegments = Math.Max(maxSegments, segmentCount);
+            maxSegments = Math.Max(maxSegments, segments.Length);
         }
 
-        // Current supported directory-based mod layouts are:
-        //
-        // Options/
-        //   Option/
-        //
-        // or:
-        //
-        // Options/
-        //   Category/
-        //     Option/
-        //
-        // The latter is used by mods such as p5rpc.misc.ps4reverts.
         var optionDepth = maxSegments >= 3 ? 2 : 1;
 
         var declared =
@@ -350,9 +332,27 @@ public sealed class ModScanner
             if (segments.Length < optionDepth)
                 continue;
 
+            var optionSegments = segments
+                .Take(optionDepth)
+                .ToArray();
+
             declared.Add(
                 optionsPrefix +
-                string.Join('/', segments.Take(optionDepth)));
+                string.Join('/', optionSegments));
+
+            // Metadata can contain the physical ".disabled" folder name.
+            // Also register its normalized logical equivalent.
+            if (optionSegments.Length > 0 &&
+                optionSegments[^1].EndsWith(
+                    ".disabled",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                optionSegments[^1] = optionSegments[^1][..^".disabled".Length];
+
+                declared.Add(
+                    optionsPrefix +
+                    string.Join('/', optionSegments));
+            }
         }
 
         return (declared, optionDepth);
@@ -402,10 +402,7 @@ public sealed class ModScanner
         {
             subdirectories = Directory.EnumerateDirectories(directory);
         }
-        catch (Exception ex) when (
-            ex is UnauthorizedAccessException or
-            IOException or
-            DirectoryNotFoundException)
+        catch (Exception) when (true)
         {
             issues.Add(new ScanIssue(
                 ScanIssueKind.IgnoredEntry,
@@ -419,22 +416,17 @@ public sealed class ModScanner
         {
             var rawName = Path.GetFileName(subdir);
 
-            // 'name' is the logical/display name.
-            // 'subdir' remains the real physical path on disk.
-            var (name, _) =
+            // Logical name/path: ".disabled" is removed.
+            // Physical path: subdir, which still includes ".disabled".
+            var (name, canonicalPath) =
                 NormalizeDisabledDirectory(rawName, subdir);
-
-            // Logical path is used only for RelativePath calculations.
-            // This removes ".disabled" from the logical option name.
-            var logicalPath =
-                Path.Combine(canonicalDirectory, name);
 
             if (depth + 1 >= optionDepth)
             {
                 var relFromRoot =
                     Path.GetRelativePath(
                         optionsRoot,
-                        logicalPath);
+                        canonicalPath);
 
                 var checkPath =
                     $"{OptionsDirectoryName}/{relFromRoot.Replace(
@@ -447,9 +439,9 @@ public sealed class ModScanner
                     {
                         Name = name,
 
-                        // IMPORTANT:
-                        // Keep the physical directory, including ".disabled".
-                        Directory = subdir,
+                        // Preserve the original contract:
+                        // Directory is the normalized logical path.
+                        Directory = canonicalPath,
 
                         RelativePath = Path.Combine(
                             OptionsDirectoryName,
@@ -460,11 +452,11 @@ public sealed class ModScanner
                 continue;
             }
 
-            // Recurse through the real directory on disk while carrying
-            // the logical path separately.
+            // Recurse using the real directory, but retain the normalized
+            // path as the canonical/logical path.
             ScanOptionLevel(
                 subdir,
-                logicalPath,
+                canonicalPath,
                 optionsRoot,
                 depth + 1,
                 optionDepth,
@@ -496,9 +488,7 @@ public sealed class ModScanner
         {
             var rawName = Path.GetFileName(subdir);
 
-            // 'name' strips ".disabled" for display/logical identity.
-            // The physical directory is always 'subdir'.
-            var (name, _) =
+            var (name, canonicalPath) =
                 NormalizeDisabledDirectory(rawName, subdir);
 
             // Filter out system folders and common modloader / game data directories.
@@ -510,10 +500,6 @@ public sealed class ModScanner
             }
 
             // Exclude directories whose own name is an archive file.
-            //
-            // Previously this used Contains(".BIN"), Contains(".CPK"), etc.,
-            // which could incorrectly reject legitimate folder names such as:
-            // "My.BINFix".
             var extension = Path.GetExtension(name);
 
             if (extension.Equals(".BIN", StringComparison.OrdinalIgnoreCase) ||
@@ -557,12 +543,10 @@ public sealed class ModScanner
             {
                 Name = name,
 
-                // IMPORTANT:
-                // Keep ".disabled" in the physical path so callers can
-                // correctly locate/rename/enable/disable the directory.
-                Directory = diskPath,
+                // Preserve the existing/public scanner contract:
+                // normalized path without ".disabled".
+                Directory = canonicalPath,
 
-                // Logical path remains normalized without ".disabled".
                 RelativePath = name,
             });
         }
@@ -586,9 +570,6 @@ public sealed class ModScanner
             var originalName =
                 rawName[..^disabledSuffix.Length];
 
-            // The returned Directory value is retained for compatibility
-            // with the existing method signature. Callers that need the
-            // actual filesystem path should use 'fullPath' directly.
             var canonicalPath =
                 Path.Combine(
                     Path.GetDirectoryName(fullPath)!,
