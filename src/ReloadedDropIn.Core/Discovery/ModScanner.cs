@@ -199,7 +199,7 @@ public sealed class ModScanner
     {
         var metadataPath = Path.Combine(modDirectory, UpdateMetadataFileName);
         if (!File.Exists(metadataPath))
-            return (null, 1);
+            return (null, 0);
 
         List<string> filePaths;
         try
@@ -208,11 +208,11 @@ public sealed class ModScanner
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            return (null, 1);
+            return (null, 0);
         }
 
         if (filePaths.Count == 0)
-            return (null, 1);
+            return (null, 0);
 
         const string optionsPrefix = OptionsDirectoryName + "/";
         var maxSegments = 0;
@@ -226,7 +226,8 @@ public sealed class ModScanner
             maxSegments = Math.Max(maxSegments, segmentCount);
         }
 
-        var optionDepth = maxSegments >= 3 ? 2 : 1;
+        // Determine option depth dynamically based on file path depth
+        var optionDepth = maxSegments > 2 ? maxSegments - 1 : 1;
 
         var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var relative in filePaths)
@@ -236,10 +237,11 @@ public sealed class ModScanner
                 continue;
 
             var segments = normalized[optionsPrefix.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries);
-            if (segments.Length < optionDepth)
+            if (segments.Length == 0)
                 continue;
 
-            declared.Add(optionsPrefix + string.Join('/', segments.Take(optionDepth)));
+            var takeCount = Math.Min(optionDepth, segments.Length);
+            declared.Add(optionsPrefix + string.Join('/', segments.Take(takeCount)));
         }
 
         return (declared, optionDepth);
@@ -291,30 +293,31 @@ public sealed class ModScanner
             var (name, _) = NormalizeDisabledDirectory(rawName, subdir);
             var canonicalPath = Path.Combine(canonicalDirectory, name);
 
-            bool isOptionLevel = (depth + 1 >= optionDepth);
-
-            if (!isOptionLevel)
+            // Determine if this directory contains actual files or matches an option leaf
+            bool hasFiles = false;
+            try
             {
-                try
-                {
-                    bool hasContentFiles = Directory.EnumerateFiles(subdir, "*.*", SearchOption.TopDirectoryOnly)
-                        .Any(f => !Path.GetFileName(f).Equals(UpdateMetadataFileName, StringComparison.OrdinalIgnoreCase));
-                    if (hasContentFiles)
-                    {
-                        isOptionLevel = true;
-                    }
-                }
-                catch
-                {
-                }
+                hasFiles = Directory.EnumerateFiles(subdir, "*.*", SearchOption.AllDirectories)
+                    .Any(f => !Path.GetFileName(f).Equals(UpdateMetadataFileName, StringComparison.OrdinalIgnoreCase));
+            }
+            catch
+            {
             }
 
-            if (isOptionLevel)
+            bool isOptionLevel = (optionDepth > 0 && depth + 1 >= optionDepth) || !hasFiles || Directory.EnumerateDirectories(subdir).Any(d => 
+            {
+                var subName = Path.GetFileName(d);
+                var (normSubName, _) = NormalizeDisabledDirectory(subName, d);
+                return s_ignoredContentFolders.Contains(normSubName);
+            });
+
+            // If it has files directly or hits the target option depth without further sub-options
+            if (depth + 1 >= (optionDepth == 0 ? 1 : optionDepth) || (hasFiles && !Directory.EnumerateDirectories(subdir).Any(d => !Path.GetFileName(d).EndsWith(".disabled", StringComparison.OrdinalIgnoreCase) && Directory.EnumerateFiles(d, "*.*", SearchOption.AllDirectories).Any())))
             {
                 var relFromRoot = Path.GetRelativePath(optionsRoot, canonicalPath);
                 var checkPath = $"{OptionsDirectoryName}/{relFromRoot.Replace(Path.DirectorySeparatorChar, '/')}";
 
-                if (declared is null || declared.Contains(checkPath) || declared.Any(d => d.StartsWith(checkPath, StringComparison.OrdinalIgnoreCase)))
+                if (declared is null || declared.Count == 0 || declared.Contains(checkPath) || declared.Any(d => d.StartsWith(checkPath, StringComparison.OrdinalIgnoreCase)))
                 {
                     options.Add(new ModOption
                     {
