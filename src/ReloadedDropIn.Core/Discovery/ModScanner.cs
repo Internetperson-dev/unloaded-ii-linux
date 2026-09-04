@@ -54,7 +54,9 @@ public sealed class ModScanner
         {
             foreach (var file in Directory.EnumerateFiles(modsDirectory))
             {
-                if (!Path.GetFileName(file).Equals("PUT_MODS_HERE.txt", StringComparison.OrdinalIgnoreCase))
+                if (!Path.GetFileName(file).Equals(
+                        "PUT_MODS_HERE.txt",
+                        StringComparison.OrdinalIgnoreCase))
                 {
                     issues.Add(new ScanIssue(
                         ScanIssueKind.IgnoredEntry,
@@ -63,7 +65,7 @@ public sealed class ModScanner
                 }
             }
         }
-        catch (Exception) when (true)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             issues.Add(new ScanIssue(
                 ScanIssueKind.IgnoredEntry,
@@ -77,7 +79,9 @@ public sealed class ModScanner
             .OrderBy(m => m.Directory, StringComparer.Ordinal)
             .ToList();
 
-        var byId = new Dictionary<string, DiscoveredMod>(StringComparer.OrdinalIgnoreCase);
+        var byId = new Dictionary<string, DiscoveredMod>(
+            StringComparer.OrdinalIgnoreCase);
+
         var unique = new List<DiscoveredMod>();
 
         foreach (var mod in sorted)
@@ -120,7 +124,10 @@ public sealed class ModScanner
         {
             subdirectories = Directory.EnumerateDirectories(directory);
         }
-        catch (Exception) when (true)
+        catch (Exception ex) when (
+            ex is UnauthorizedAccessException or
+            IOException or
+            DirectoryNotFoundException)
         {
             issues.Add(new ScanIssue(
                 ScanIssueKind.IgnoredEntry,
@@ -132,7 +139,9 @@ public sealed class ModScanner
 
         foreach (var subdirectory in subdirectories)
         {
-            var manifestPath = Path.Combine(subdirectory, ModManifest.FileName);
+            var manifestPath = Path.Combine(
+                subdirectory,
+                ModManifest.FileName);
 
             if (File.Exists(manifestPath))
             {
@@ -142,7 +151,8 @@ public sealed class ModScanner
                 {
                     manifestText = File.ReadAllText(manifestPath);
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException)
                 {
                     issues.Add(new ScanIssue(
                         ScanIssueKind.InvalidManifest,
@@ -152,7 +162,8 @@ public sealed class ModScanner
                     goto Recurse;
                 }
 
-                var manifest = ModManifest.TryParse(manifestText, out var error);
+                var manifest =
+                    ModManifest.TryParse(manifestText, out var error);
 
                 if (manifest is null)
                 {
@@ -163,14 +174,23 @@ public sealed class ModScanner
                 }
                 else
                 {
-                    var options = ScanOptions(subdirectory, issues);
-                    var contentSubs = ScanContentSubModules(subdirectory, issues);
-                    var configOptions = ScanModConfigOptions(manifestText, subdirectory);
+                    var options =
+                        ScanOptions(subdirectory, issues);
+
+                    var contentSubs =
+                        ScanContentSubModules(subdirectory, issues);
+
+                    var configOptions =
+                        ScanModConfigOptions(
+                            manifestText,
+                            subdirectory);
 
                     var allOptions = options
                         .Concat(contentSubs)
                         .Concat(configOptions)
-                        .DistinctBy(o => o.RelativePath, StringComparer.OrdinalIgnoreCase)
+                        .DistinctBy(
+                            o => o.RelativePath,
+                            StringComparer.OrdinalIgnoreCase)
                         .ToList();
 
                     mods.Add(new DiscoveredMod
@@ -183,7 +203,11 @@ public sealed class ModScanner
             }
 
         Recurse:
-            ScanDirectory(subdirectory, depth + 1, mods, issues);
+            ScanDirectory(
+                subdirectory,
+                depth + 1,
+                mods,
+                issues);
         }
     }
 
@@ -195,20 +219,27 @@ public sealed class ModScanner
 
         try
         {
-            using var doc = JsonDocument.Parse(manifestText);
+            using var doc =
+                JsonDocument.Parse(manifestText);
 
-            if (doc.RootElement.TryGetProperty("ConfigurableOptions", out var configOpts) &&
+            if (doc.RootElement.TryGetProperty(
+                    "ConfigurableOptions",
+                    out var configOpts) &&
                 configOpts.ValueKind == JsonValueKind.Array)
             {
                 foreach (var opt in configOpts.EnumerateArray())
                 {
-                    if (opt.TryGetProperty("Id", out var idProp) &&
+                    if (opt.TryGetProperty(
+                            "Id",
+                            out var idProp) &&
                         idProp.ValueKind == JsonValueKind.String)
                     {
                         var id = idProp.GetString()!;
 
                         var name =
-                            opt.TryGetProperty("Name", out var nameProp) &&
+                            opt.TryGetProperty(
+                                "Name",
+                                out var nameProp) &&
                             nameProp.ValueKind == JsonValueKind.String
                                 ? nameProp.GetString()!
                                 : id;
@@ -216,7 +247,10 @@ public sealed class ModScanner
                         result.Add(new ModOption
                         {
                             Name = name,
-                            Directory = Path.Combine(modDirectory, ".config", id),
+                            Directory = Path.Combine(
+                                modDirectory,
+                                ".config",
+                                id),
                             RelativePath = $"config:{id}"
                         });
                     }
@@ -234,7 +268,10 @@ public sealed class ModScanner
         string modDirectory,
         List<ScanIssue> issues)
     {
-        var optionsDir = Path.Combine(modDirectory, OptionsDirectoryName);
+        var optionsDir =
+            Path.Combine(
+                modDirectory,
+                OptionsDirectoryName);
 
         if (!Directory.Exists(optionsDir))
             return [];
@@ -245,7 +282,7 @@ public sealed class ModScanner
             ReadUpdateMetadataOptionPaths(modDirectory);
 
         ScanOptionLevel(
-            directory: optionsDir,
+            optionsDir,
             canonicalDirectory: optionsDir,
             optionsRoot: optionsDir,
             depth: 0,
@@ -255,7 +292,9 @@ public sealed class ModScanner
             issues: issues);
 
         return options
-            .OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(
+                o => o.Name,
+                StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
@@ -265,7 +304,9 @@ public sealed class ModScanner
         ReadUpdateMetadataOptionPaths(string modDirectory)
     {
         var metadataPath =
-            Path.Combine(modDirectory, UpdateMetadataFileName);
+            Path.Combine(
+                modDirectory,
+                UpdateMetadataFileName);
 
         if (!File.Exists(metadataPath))
             return (null, 1);
@@ -274,7 +315,8 @@ public sealed class ModScanner
 
         try
         {
-            filePaths = ReadUpdateMetadataFilePaths(metadataPath);
+            filePaths =
+                ReadUpdateMetadataFilePaths(metadataPath);
         }
         catch (Exception ex) when (
             ex is JsonException or
@@ -287,13 +329,15 @@ public sealed class ModScanner
         if (filePaths.Count == 0)
             return (null, 1);
 
-        const string optionsPrefix = OptionsDirectoryName + "/";
+        const string optionsPrefix =
+            OptionsDirectoryName + "/";
 
         var maxSegments = 0;
 
         foreach (var relative in filePaths)
         {
-            var normalized = relative.Replace('\\', '/');
+            var normalized =
+                relative.Replace('\\', '/');
 
             if (!normalized.StartsWith(
                     optionsPrefix,
@@ -304,19 +348,38 @@ public sealed class ModScanner
 
             var segments =
                 normalized[optionsPrefix.Length..]
-                    .Split('/', StringSplitOptions.RemoveEmptyEntries);
+                    .Split(
+                        '/',
+                        StringSplitOptions.RemoveEmptyEntries);
 
-            maxSegments = Math.Max(maxSegments, segments.Length);
+            maxSegments =
+                Math.Max(
+                    maxSegments,
+                    segments.Length);
         }
 
-        var optionDepth = maxSegments >= 3 ? 2 : 1;
+        // Options/
+        //   Option/
+        //
+        // or:
+        //
+        // Options/
+        //   Category/
+        //     Option/
+        //
+        var optionDepth =
+            maxSegments >= 3
+                ? 2
+                : 1;
 
         var declared =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
 
         foreach (var relative in filePaths)
         {
-            var normalized = relative.Replace('\\', '/');
+            var normalized =
+                relative.Replace('\\', '/');
 
             if (!normalized.StartsWith(
                     optionsPrefix,
@@ -327,44 +390,51 @@ public sealed class ModScanner
 
             var segments =
                 normalized[optionsPrefix.Length..]
-                    .Split('/', StringSplitOptions.RemoveEmptyEntries);
+                    .Split(
+                        '/',
+                        StringSplitOptions.RemoveEmptyEntries);
 
             if (segments.Length < optionDepth)
                 continue;
 
-            var optionSegments = segments
-                .Take(optionDepth)
-                .ToArray();
+            var optionSegments =
+                segments
+                    .Take(optionDepth)
+                    .Select(NormalizeDisabledSegment)
+                    .ToArray();
 
             declared.Add(
                 optionsPrefix +
                 string.Join('/', optionSegments));
-
-            // Metadata can contain the physical ".disabled" folder name.
-            // Also register its normalized logical equivalent.
-            if (optionSegments.Length > 0 &&
-                optionSegments[^1].EndsWith(
-                    ".disabled",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                optionSegments[^1] = optionSegments[^1][..^".disabled".Length];
-
-                declared.Add(
-                    optionsPrefix +
-                    string.Join('/', optionSegments));
-            }
         }
 
         return (declared, optionDepth);
     }
 
-    private static List<string> ReadUpdateMetadataFilePaths(string path)
+    private static string NormalizeDisabledSegment(string segment)
+    {
+        const string disabledSuffix = ".disabled";
+
+        return segment.EndsWith(
+                disabledSuffix,
+                StringComparison.OrdinalIgnoreCase)
+            ? segment[..^disabledSuffix.Length]
+            : segment;
+    }
+
+    private static List<string> ReadUpdateMetadataFilePaths(
+        string path)
     {
         using var document =
-            JsonDocument.Parse(File.ReadAllText(path));
+            JsonDocument.Parse(
+                File.ReadAllText(path));
 
-        if (!document.RootElement.TryGetProperty("Hashes", out var hashes) ||
-            !hashes.TryGetProperty("Files", out var files) ||
+        if (!document.RootElement.TryGetProperty(
+                "Hashes",
+                out var hashes) ||
+            !hashes.TryGetProperty(
+                "Files",
+                out var files) ||
             files.ValueKind != JsonValueKind.Array)
         {
             return [];
@@ -379,7 +449,8 @@ public sealed class ModScanner
                     out var relative) &&
                 relative.ValueKind == JsonValueKind.String)
             {
-                result.Add(relative.GetString()!);
+                result.Add(
+                    relative.GetString()!);
             }
         }
 
@@ -400,9 +471,13 @@ public sealed class ModScanner
 
         try
         {
-            subdirectories = Directory.EnumerateDirectories(directory);
+            subdirectories =
+                Directory.EnumerateDirectories(directory);
         }
-        catch (Exception) when (true)
+        catch (Exception ex) when (
+            ex is UnauthorizedAccessException or
+            IOException or
+            DirectoryNotFoundException)
         {
             issues.Add(new ScanIssue(
                 ScanIssueKind.IgnoredEntry,
@@ -414,12 +489,13 @@ public sealed class ModScanner
 
         foreach (var subdir in subdirectories)
         {
-            var rawName = Path.GetFileName(subdir);
+            var rawName =
+                Path.GetFileName(subdir);
 
-            // Logical name/path: ".disabled" is removed.
-            // Physical path: subdir, which still includes ".disabled".
             var (name, canonicalPath) =
-                NormalizeDisabledDirectory(rawName, subdir);
+                NormalizeDisabledDirectory(
+                    rawName,
+                    subdir);
 
             if (depth + 1 >= optionDepth)
             {
@@ -433,16 +509,13 @@ public sealed class ModScanner
                         Path.DirectorySeparatorChar,
                         '/')}";
 
-                if (declared is null || declared.Contains(checkPath))
+                if (declared is null ||
+                    declared.Contains(checkPath))
                 {
                     options.Add(new ModOption
                     {
                         Name = name,
-
-                        // Preserve the original contract:
-                        // Directory is the normalized logical path.
                         Directory = canonicalPath,
-
                         RelativePath = Path.Combine(
                             OptionsDirectoryName,
                             relFromRoot),
@@ -452,8 +525,6 @@ public sealed class ModScanner
                 continue;
             }
 
-            // Recurse using the real directory, but retain the normalized
-            // path as the canonical/logical path.
             ScanOptionLevel(
                 subdir,
                 canonicalPath,
@@ -477,7 +548,8 @@ public sealed class ModScanner
         try
         {
             subdirectories =
-                Directory.EnumerateDirectories(modDirectory);
+                Directory.EnumerateDirectories(
+                    modDirectory);
         }
         catch (Exception)
         {
@@ -486,10 +558,13 @@ public sealed class ModScanner
 
         foreach (var subdir in subdirectories)
         {
-            var rawName = Path.GetFileName(subdir);
+            var rawName =
+                Path.GetFileName(subdir);
 
             var (name, canonicalPath) =
-                NormalizeDisabledDirectory(rawName, subdir);
+                NormalizeDisabledDirectory(
+                    rawName,
+                    subdir);
 
             // Filter out system folders and common modloader / game data directories.
             if (s_ignoredContentFolders.Contains(name) ||
@@ -499,24 +574,42 @@ public sealed class ModScanner
                 continue;
             }
 
-            // Exclude directories whose own name is an archive file.
-            var extension = Path.GetExtension(name);
+            // Exclude directories named after game archive files.
+            //
+            // Use the extension instead of Contains(), so a legitimate
+            // option such as "My.BINFix" is not accidentally excluded.
+            var extension =
+                Path.GetExtension(name);
 
-            if (extension.Equals(".BIN", StringComparison.OrdinalIgnoreCase) ||
-                extension.Equals(".CPK", StringComparison.OrdinalIgnoreCase) ||
-                extension.Equals(".PAC", StringComparison.OrdinalIgnoreCase) ||
-                extension.Equals(".ARC", StringComparison.OrdinalIgnoreCase) ||
-                extension.Equals(".AWB", StringComparison.OrdinalIgnoreCase) ||
-                extension.Equals(".ACB", StringComparison.OrdinalIgnoreCase))
+            if (extension.Equals(
+                    ".BIN",
+                    StringComparison.OrdinalIgnoreCase) ||
+                extension.Equals(
+                    ".CPK",
+                    StringComparison.OrdinalIgnoreCase) ||
+                extension.Equals(
+                    ".PAC",
+                    StringComparison.OrdinalIgnoreCase) ||
+                extension.Equals(
+                    ".ARC",
+                    StringComparison.OrdinalIgnoreCase) ||
+                extension.Equals(
+                    ".AWB",
+                    StringComparison.OrdinalIgnoreCase) ||
+                extension.Equals(
+                    ".ACB",
+                    StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            // Always inspect the actual physical directory.
+            // Always inspect the physical path on disk.
             var diskPath = subdir;
 
             if (File.Exists(
-                    Path.Combine(diskPath, ModManifest.FileName)))
+                    Path.Combine(
+                        diskPath,
+                        ModManifest.FileName)))
             {
                 continue;
             }
@@ -543,8 +636,8 @@ public sealed class ModScanner
             {
                 Name = name,
 
-                // Preserve the existing/public scanner contract:
-                // normalized path without ".disabled".
+                // Preserve the existing ModOption contract:
+                // Directory is the normalized/logical path.
                 Directory = canonicalPath,
 
                 RelativePath = name,
@@ -552,11 +645,15 @@ public sealed class ModScanner
         }
 
         return options
-            .OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(
+                o => o.Name,
+                StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    private static (string Name, string Directory)
+    private static (
+        string Name,
+        string Directory)
         NormalizeDisabledDirectory(
             string rawName,
             string fullPath)
@@ -575,9 +672,13 @@ public sealed class ModScanner
                     Path.GetDirectoryName(fullPath)!,
                     originalName);
 
-            return (originalName, canonicalPath);
+            return (
+                originalName,
+                canonicalPath);
         }
 
-        return (rawName, fullPath);
+        return (
+            rawName,
+            fullPath);
     }
 }
