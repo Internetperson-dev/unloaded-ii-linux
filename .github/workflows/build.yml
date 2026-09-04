@@ -1,0 +1,52 @@
+name: Build Release Package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64 p7zip-full zip
+
+      - name: Create vendor directory and download Reloaded-II
+        run: |
+          mkdir -p vendor/reloaded-release/extracted
+          curl -sL -o vendor/reloaded-release/Release.zip \
+            https://github.com/Reloaded-Project/Reloaded-II/releases/download/1.30.2/Release.zip
+          unzip -q vendor/reloaded-release/Release.zip -d vendor/reloaded-release/extracted
+
+      - name: Download .NET Desktop Runtime
+        run: |
+          curl -sL -o vendor/reloaded-release/windowsdesktop-runtime-win-x64.zip \
+            "https://aka.ms/dotnet/9.0/windowsdesktop-runtime-win-x64.zip"
+
+      - name: Download .NET Runtime
+        run: |
+          curl -sL -o vendor/reloaded-release/dotnet-runtime-win-x64.zip \
+            "https://aka.ms/dotnet/9.0/dotnet-runtime-win-x64.zip"
+
+      - name: Restore NuGet packages
+        run: dotnet restore
+
+      - name: Build and package
+        run: ./scripts/package-release.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unloaded-ii
+          path: dist/unloaded-ii-*.zip
+          if-no-files-found: error

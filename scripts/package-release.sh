@@ -130,7 +130,7 @@ cp "$ROOT/dist/faith-overlay-publish/ReloadedDropIn.Overlay.Faith.pdb" \
   "$STAGE/mods/_base-mods/reloaded.dropin.overlay/"
 cp "$ROOT/dist/faith-overlay-publish/NenTools.ImGui.Interfaces.dll" \
   "$STAGE/mods/_base-mods/reloaded.dropin.overlay/"
-sed -i '' "s/\"ModVersion\": \"[^\"]*\"/\"ModVersion\": \"${DROPIN_VERSION%-dev}\"/" \
+sed -i "s/\"ModVersion\": \"[^\"]*\"/\"ModVersion\": \"${DROPIN_VERSION%-dev}\"/" \
   "$STAGE/mods/_base-mods/reloaded.dropin.overlay/ModConfig.json"
 # The publish emits native cimgui for every platform; the game is win-x64 only.
 find "$STAGE/mods/_base-mods/reloaded.dropin.overlay/runtimes" \
