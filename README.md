@@ -8,6 +8,9 @@ A "Intro Skip" option from [p5rpc.modloader](https://github.com/Sewer56/p5rpc.mo
 
 (Options blurred to prevent spoilers.)
 
+<img width="1875" height="251" alt="image" src="https://github.com/user-attachments/assets/efc31877-8c4a-4182-bf65-7e6b02ad9715" />
+
+
 
 A drag-and-drop, multi-game frontend and packaging layer around
 [Reloaded-II](https://github.com/Reloaded-Project/Reloaded-II).
