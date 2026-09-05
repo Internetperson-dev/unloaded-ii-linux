@@ -4,8 +4,10 @@ This AI-coded fork of Unloaded-II adds enabling and disabling mods and mod optio
 
 A "Intro Skip" option from [p5rpc.modloader](https://github.com/Sewer56/p5rpc.modloader/blob/db4ee5efe6e3226600be13c5697306f721d386fa/p5rpc.modloader/Patches/P5R/SkipIntro.cs#L9) is also added.
 
+<img width="1920" height="1080" alt="Persona 5 Royal Mod Menu Blured Due To Spoliers" src="https://github.com/user-attachments/assets/644958f4-899c-48db-b340-6a548c154bd8" />
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/d04cabaa-45da-4f5e-9b25-89ff0f00ba4a" />
+(Options blurred to prevent spoilers.)
+
 
 A drag-and-drop, multi-game frontend and packaging layer around
 [Reloaded-II](https://github.com/Reloaded-Project/Reloaded-II).
