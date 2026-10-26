@@ -10,8 +10,8 @@
     "linux-proton"
   ],
   "injection": {
-    "preferredProxy": "dxgi.dll",
-    "wineOverride": "dxgi=n,b"
+    "preferredProxy": "winmm.dll",
+    "wineOverride": "winmm=n,b"
   },
   "requiredMods": [
     { "id": "p3rpc.essentials", "enabled": true },

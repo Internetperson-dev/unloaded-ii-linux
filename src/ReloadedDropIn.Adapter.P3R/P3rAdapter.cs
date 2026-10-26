@@ -96,8 +96,8 @@ public sealed class P3rAdapter : IGameAdapter
 
     public InjectionConfiguration GetInjectionConfiguration(AdapterContext context) => new()
     {
-        PreferredProxyDll = "dxgi.dll",
-        WineDllOverride = "dxgi=n,b",
+        PreferredProxyDll = "winmm.dll",
+        WineDllOverride = "winmm=n,b",
     };
 
     public IReadOnlyList<string> GetDisposableModStatePaths(AdapterContext context) => [];
