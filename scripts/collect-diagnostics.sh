@@ -28,6 +28,7 @@ fi
 GAME_ID="unknown"
 if   [ -f "$GAME_DIR/granblue_fantasy_relink.exe" ]; then GAME_ID="gbfr"
 elif [ -f "$GAME_DIR/P5R.exe" ]; then GAME_ID="p5r"
+elif [ -f "$GAME_DIR/P3R.exe" ]; then GAME_ID="p3r"
 elif [ -f "$GAME_DIR/ffxvi.exe" ] || [ -f "$GAME_DIR/ffxvi_demo.exe" ]; then GAME_ID="ffxvi"
 elif [ -f "$GAME_DIR/Digimon Story Time Stranger.exe" ]; then GAME_ID="dsts"
 fi
@@ -51,6 +52,7 @@ if [ -z "$APPID" ]; then
   case "$GAME_ID" in
     gbfr)  APPID="881020" ;;
     p5r)   APPID="1687950" ;;
+    p3r)   APPID="2161700" ;;
     ffxvi) APPID="2515020" ;;
     dsts)  APPID="1984270" ;;
   esac
