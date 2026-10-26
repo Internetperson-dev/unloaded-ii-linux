@@ -1,0 +1,25 @@
+{
+  "id": "p3r",
+  "displayName": "Persona 3 Reload",
+  "steamAppIds": [2161700],
+  "executables": [
+    "P3R.exe"
+  ],
+  "platforms": [
+    "windows",
+    "linux-proton"
+  ],
+  "injection": {
+    "preferredProxy": "winmm.dll",
+    "wineOverride": "winmm=n,b",
+      },
+  "requiredMods": [
+    { "id": "p3rpc.essentials", "enabled": true },
+    { "id": "UnrealEssentials", "enabled": false },
+    { "id": "UTOC.Stream.Emulator", "enabled": false },
+    { "id": "reloaded.sharedlib.hooks", "enabled": false },
+    { "id": "Reloaded.Memory.SigScan.ReloadedII", "enabled": false }
+  ],
+  "backups": [],
+  "notes": "UE4 4.27; modding goes through UnrealEssentials + p3rpc.essentials."
+}

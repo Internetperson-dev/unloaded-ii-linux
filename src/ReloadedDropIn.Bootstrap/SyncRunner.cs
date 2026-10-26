@@ -40,7 +40,7 @@ public sealed class SyncRunner
             Log($"sync starting in {gameDirectory}");
 
             var adapters = new IGameAdapter[]
-                { new GbfrAdapter(), new Adapter.P5R.P5rAdapter(), new Adapter.FFXVI.FfxviAdapter(), new Adapter.DSTS.DstsAdapter() };
+                { new GbfrAdapter(), new Adapter.P5R.P5rAdapter(), new Adapter.FFXVI.FfxviAdapter(), new Adapter.DSTS.DstsAdapter(), new Adapter.P3R.P3rAdapter() };
             var (adapter, detection) = DetectAdapter(adapters, context);
             if (adapter is null || detection?.ExecutablePath is null)
             {
@@ -268,7 +268,7 @@ public sealed class SyncRunner
         try
         {
             var adapters = new IGameAdapter[]
-                { new GbfrAdapter(), new Adapter.P5R.P5rAdapter(), new Adapter.FFXVI.FfxviAdapter(), new Adapter.DSTS.DstsAdapter() };
+                { new GbfrAdapter(), new Adapter.P5R.P5rAdapter(), new Adapter.FFXVI.FfxviAdapter(), new Adapter.DSTS.DstsAdapter(), new Adapter.P3R.P3rAdapter() };
             var (adapter, _) = DetectAdapter(adapters, context);
             if (adapter is null)
             {

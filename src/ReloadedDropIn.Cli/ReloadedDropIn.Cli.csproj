@@ -7,6 +7,7 @@
     <ProjectReference Include="..\ReloadedDropIn.Bootstrap\ReloadedDropIn.Bootstrap.csproj" />
     <ProjectReference Include="..\ReloadedDropIn.Adapter.FFXVI\ReloadedDropIn.Adapter.FFXVI.csproj" />
     <ProjectReference Include="..\ReloadedDropIn.Adapter.DSTS\ReloadedDropIn.Adapter.DSTS.csproj" />
+    <ProjectReference Include="..\ReloadedDropIn.Adapter.P3R\ReloadedDropIn.Adapter.P3R.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
