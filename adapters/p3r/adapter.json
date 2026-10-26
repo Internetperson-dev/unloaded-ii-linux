@@ -11,7 +11,7 @@
   ],
   "injection": {
     "preferredProxy": "winmm.dll",
-    "wineOverride": "winmm=n,b",
+    "wineOverride": "winmm=n,b"
       },
   "requiredMods": [
     { "id": "p3rpc.essentials", "enabled": true },

@@ -31,7 +31,7 @@ export PATH="$HOME/.dotnet:$PATH"
 
 # Single source of truth for the drop-in version: the VERSION file at repo
 # root. It flows into version.json, which the overlay watermark reads.
-DROPIN_VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+DROPIN_VERSION="${DROPIN_VERSION:-$(tr -d '[:space:]' < "$ROOT/VERSION")}"
 RELOADED_VERSION="1.30.2"
 # All supported games deliberately share the winmm proxy and launch option;
 # override (PROXY_NAME=dinput8.dll) only to build an experimental variant for
