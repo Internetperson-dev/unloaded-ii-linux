@@ -96,7 +96,7 @@ public sealed class P3rAdapter : IGameAdapter
 
     public InjectionConfiguration GetInjectionConfiguration(AdapterContext context) => new()
     {
-        PreferredProxyDll = "winmm.dll",
+        PreferredProxyDll = "WINMM.dll",
         WineDllOverride = "winmm=n,b",
     };
 
