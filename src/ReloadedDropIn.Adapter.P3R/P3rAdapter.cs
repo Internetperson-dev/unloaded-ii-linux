@@ -44,6 +44,13 @@ public sealed class P3rAdapter : IGameAdapter
                 $"mods directory does not exist yet: {context.ModsDirectory}"));
         }
 
+        if (!File.Exists(Path.Combine(context.GameDirectory, "P3RE.dll")))
+        {
+            messages.Add(new ValidationMessage(ValidationSeverity.Warning, "p3re",
+                "P3R Enhanced mod is missing (P3RE.dll not found in game directory); " +
+                "see https://www.patreon.com/huutaiii/posts/p3r-enhanced-fsr-159746051"));
+        }
+
         return ValidationResult.From(messages);
     }
 
