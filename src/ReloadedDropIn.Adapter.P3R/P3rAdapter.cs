@@ -79,6 +79,12 @@ public sealed class P3rAdapter : IGameAdapter
             UpdateRepo = "Reloaded-Project/Reloaded.Memory.SigScan",
             UpdateAssetPrefix = "Reloaded.Memory.SigScan.ReloadedII",
         },
+        new RequiredMod
+        {
+            Id = "p3rpc.UE4SS.Reloaded-SSAO", Enabled = false,
+            UpdateRepo = "Internetperson-dev/p3rpc.UE4SS.Reloaded-SSAO",
+            UpdateAssetPrefix = "p3rpc.UE4SS.Reloaded",
+        },
     ];
 
     public InjectionConfiguration GetInjectionConfiguration(AdapterContext context) => new()

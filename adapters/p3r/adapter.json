@@ -18,7 +18,8 @@
     { "id": "UnrealEssentials", "enabled": false },
     { "id": "UTOC.Stream.Emulator", "enabled": false },
     { "id": "reloaded.sharedlib.hooks", "enabled": false },
-    { "id": "Reloaded.Memory.SigScan.ReloadedII", "enabled": false }
+    { "id": "Reloaded.Memory.SigScan.ReloadedII", "enabled": false },
+    { "id": "p3rpc.UE4SS.Reloaded-SSAO", "enabled": false }
   ],
   "backups": [],
   "notes": "UE4 4.27; modding goes through UnrealEssentials + p3rpc.essentials."
