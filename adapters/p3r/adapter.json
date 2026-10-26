@@ -10,7 +10,7 @@
     "linux-proton"
   ],
   "injection": {
-    "preferredProxy": "WINMM.dll",
+    "preferredProxy": "winmm.dll",
     "wineOverride": "winmm=n,b"
   },
   "requiredMods": [
