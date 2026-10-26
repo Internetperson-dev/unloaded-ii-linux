@@ -15,11 +15,11 @@
   },
   "requiredMods": [
     { "id": "p3rpc.essentials", "enabled": true },
-    { "id": "UnrealEssentials", "enabled": false },
-    { "id": "UTOC.Stream.Emulator", "enabled": false },
-    { "id": "reloaded.sharedlib.hooks", "enabled": false },
-    { "id": "Reloaded.Memory.SigScan.ReloadedII", "enabled": false },
-    { "id": "p3rpc.UE4SS.Reloaded-SSAO", "enabled": false }
+    { "id": "UnrealEssentials", "enabled": true },
+    { "id": "UTOC.Stream.Emulator", "enabled": true },
+    { "id": "reloaded.universal.fileemulationframework", "enabled": true },
+    { "id": "reloaded.sharedlib.hooks", "enabled": true },
+    { "id": "Reloaded.Memory.SigScan.ReloadedII", "enabled": true }
   ],
   "backups": [],
   "notes": "UE4 4.27; modding goes through UnrealEssentials + p3rpc.essentials."
