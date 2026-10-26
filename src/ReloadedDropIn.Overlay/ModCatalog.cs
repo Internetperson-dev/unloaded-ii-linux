@@ -65,6 +65,9 @@ public sealed class ModCatalog(string gameDirectory)
 
     public bool HideWatermark { get; set; }
 
+    /// <summary>P3R Enhanced (P3RE.dll) is missing from the game directory.</summary>
+    public bool P3rEnhancedMissing { get; private set; }
+
     /// <summary>Drop-in version from reloaded-dropin/version.json, for display.</summary>
     public string DropInVersion { get; private set; } = "dev";
 
@@ -76,6 +79,8 @@ public sealed class ModCatalog(string gameDirectory)
     public void Reload()
     {
         Mods.Clear();
+        P3rEnhancedMissing = File.Exists(Path.Combine(gameDirectory, "P3R.exe"))
+            && !File.Exists(Path.Combine(gameDirectory, "P3RE.dll"));
         var overrides = OverlayOverrides.Load(DropInDirectory);
         HideWatermark = overrides.HideWatermark;
         DropInVersion = ReadDropInVersion();

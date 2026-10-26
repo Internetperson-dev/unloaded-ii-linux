@@ -76,6 +76,7 @@ public sealed class OverlayUi(
 
         _imgui.Text($"Mods folder: {Path.Combine(gameDirectory, "mods")}");
         RenderUpdateBanner();
+        RenderP3rEnhancedBanner();
         if (_lastSaveError is not null)
             _imgui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f),
                 $"SAVE FAILED - change will NOT apply: {_lastSaveError}");
@@ -304,6 +305,16 @@ public sealed class OverlayUi(
                 }
             }
         }
+    }
+
+    private void RenderP3rEnhancedBanner()
+    {
+        if (!_catalog.P3rEnhancedMissing)
+            return;
+
+        _imgui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f),
+            "P3R Enhanced mod is missing (P3RE.dll not found in game directory).");
+        _imgui.Text("See https://www.patreon.com/huutaiii/posts/p3r-enhanced-fsr-159746051");
     }
 
     /// <summary>
