@@ -17,7 +17,7 @@
     { "id": "p3rpc.essentials", "enabled": true },
     { "id": "UnrealEssentials", "enabled": true },
     { "id": "UTOC.Stream.Emulator", "enabled": true },
-    { "id": "reloaded.universal.fileemulationframework", "enabled": true },
+    { "id": "reloaded.universal.fileemulationframework", "enabled": false },
     { "id": "reloaded.sharedlib.hooks", "enabled": true },
     { "id": "Reloaded.Memory.SigScan.ReloadedII", "enabled": true }
   ],

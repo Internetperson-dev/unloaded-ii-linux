@@ -58,41 +58,56 @@ public sealed class P3rAdapter : IGameAdapter
 
     public IReadOnlyList<RequiredMod> GetRequiredMods() =>
     [
+        // Persona Essentials — the P3R mod loader. Must be enabled first so
+        // Reloaded loads it before anything else.
         new RequiredMod
         {
             Id = ModLoaderModId, Enabled = true,
             UpdateRepo = "AnimatedSwine37/p3rpc.essentials",
             UpdateAssetPrefix = "p3rpc.essentials",
         },
+        // UnrealEssentials — UE4 file I/O redirection layer required by
+        // p3rpc.essentials. Declared in adapter.json; missing it breaks the
+        // whole mod stack.
         new RequiredMod
         {
-            Id = "UnrealEssentials", Enabled = false,
+            Id = "UnrealEssentials", Enabled = true,
             UpdateRepo = "AnimatedSwine37/UnrealEssentials",
             UpdateAssetPrefix = "UnrealEssentials",
         },
+        // UTOC.Stream.Emulator — UE4 streamed asset redirection required by
+        // p3rpc.essentials. Declared in adapter.json.
         new RequiredMod
         {
-            Id = "UTOC.Stream.Emulator", Enabled = false,
+            Id = "UTOC.Stream.Emulator", Enabled = true,
             UpdateRepo = "AnimatedSwine37/UnrealEssentials",
             UpdateAssetPrefix = "UTOC.Stream.Emulator",
         },
+        // Reloaded shared-lib hooks — required by the mod loader's native
+        // hooks. Declared in adapter.json.
         new RequiredMod
         {
-            Id = "reloaded.sharedlib.hooks", Enabled = false,
+            Id = "reloaded.sharedlib.hooks", Enabled = true,
             UpdateRepo = "Sewer56/Reloaded.SharedLib.Hooks.ReloadedII",
             UpdateAssetPrefix = "Reloaded.Hooks.ReloadedII",
         },
+        // Reloaded memory signature scanner — required by p3rpc.essentials.
+        // Declared in adapter.json.
         new RequiredMod
         {
-            Id = "Reloaded.Memory.SigScan.ReloadedII", Enabled = false,
+            Id = "Reloaded.Memory.SigScan.ReloadedII", Enabled = true,
             UpdateRepo = "Reloaded-Project/Reloaded.Memory.SigScan",
             UpdateAssetPrefix = "Reloaded.Memory.SigScan.ReloadedII",
         },
+        // File emulation framework — required by UnrealEssentials for runtime
+        // file redirection on UE4 titles. Declared in adapter.json but was
+        // missing from this adapter's GetRequiredMods(), so it was never
+        // downloaded and the mod stack could fail to load.
         new RequiredMod
         {
-            Id = "p3rpc.UE4SS.Reloaded-SSAO", Enabled = false,
-            UpdateRepo = "Internetperson-dev/p3rpc.UE4SS.Reloaded-SSAO",
-            UpdateAssetPrefix = "p3rpc.UE4SS.Reloaded",
+            Id = "reloaded.universal.fileemulationframework", Enabled = false,
+            UpdateRepo = "Sewer56/FileEmulationFramework",
+            UpdateAssetPrefix = "FileEmulationFramework",
         },
     ];
 
@@ -109,9 +124,16 @@ public sealed class P3rAdapter : IGameAdapter
     /// </summary>
     public IReadOnlyList<string> GetDisposableModStatePaths(AdapterContext context)
     {
-        var loader = new Core.Discovery.ModScanner().Scan(context.ModsDirectory).Mods
-            .FirstOrDefault(m => m.ModId.Equals(ModLoaderModId, StringComparison.OrdinalIgnoreCase));
-        return loader is null ? [] : [Path.Combine(loader.Directory, "Cache")];
+        // Prefer the scan cache already populated by the bootstrap over
+        // re-enumerating mods/ on every call.
+        string? loaderDir = context.ModDirectories?.TryGetValue(ModLoaderModId, out var dir) == true ? dir : null;
+        if (loaderDir is null)
+        {
+            var loader = new Core.Discovery.ModScanner().Scan(context.ModsDirectory).Mods
+                .FirstOrDefault(m => m.ModId.Equals(ModLoaderModId, StringComparison.OrdinalIgnoreCase));
+            loaderDir = loader?.Directory;
+        }
+        return loaderDir is null ? [] : [Path.Combine(loaderDir, "Cache")];
     }
 
     public Task<IReadOnlyList<string>> AfterGenerateConfigurationAsync(
