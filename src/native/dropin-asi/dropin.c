@@ -21,6 +21,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <excpt.h>
 
 /* Windows' MAX_PATH (260) is too short for deep mods/ trees or long user
    profiles. 4096 covers all realistic Steam library paths without needing
@@ -233,11 +234,21 @@ static void bootstrap(void);
 static DWORD WINAPI bootstrap_thread(LPVOID parameter)
 {
     (void)parameter;
-    bootstrap();
-    /* The game must ALWAYS resume, whether we succeeded or bailed out. */
-    release_game_entry();
-    if (g_log)
-        fflush(g_log);
+    /* Use SEH so release_game_entry() is guaranteed to run even if bootstrap()
+       crashes (native fault in hostfxr, CoreCLR, or Reloaded's loader).
+       Without this, a crash leaves the game entry point patched to a spin
+       loop forever: the process runs but no window ever appears. */
+    __try
+    {
+        bootstrap();
+    }
+    __finally
+    {
+        /* The game must ALWAYS resume, whether we succeeded or bailed out. */
+        release_game_entry();
+        if (g_log)
+            fflush(g_log);
+    }
     return 0;
 }
 
@@ -252,7 +263,15 @@ __declspec(dllexport) void InitializeASI(void)
     if (!thread)
         return;
 
-    WaitForSingleObject(thread, INFINITE);
+    /* Wait for the bootstrap to finish, but with a timeout: if it hangs
+       (e.g. network stall in BaseModInstaller), release the game entry so
+       the process can at least launch vanilla instead of being stuck forever. */
+    DWORD waitResult = WaitForSingleObject(thread, 30000); /* 30 seconds */
+    if (waitResult == WAIT_TIMEOUT)
+    {
+        log_line("WARNING: bootstrap timed out after 30s; releasing game entry to run vanilla");
+        release_game_entry();
+    }
     CloseHandle(thread);
     g_bootstrap_thread = NULL;
     log_line("Ultimate ASI Loader synchronization complete");
