@@ -1,3 +1,4 @@
+
 name: Build Release Package
 
 on:
@@ -9,9 +10,10 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -36,17 +38,131 @@ jobs:
         run: |
           set -euo pipefail
 
-          sudo -E timeout 300 apt-get update \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30
+          # Mirror list supported by Ubuntu 24.04 GitHub runners.
+          mirrors=(
+            "http://azure.archive.ubuntu.com/ubuntu/"
+            "http://archive.ubuntu.com/ubuntu/"
+            "http://us.archive.ubuntu.com/ubuntu/"
+          )
 
-          sudo -E timeout 600 apt-get install -y \
-            --no-install-recommends \
-            -o DPkg::Lock::Timeout=120 \
-            -o Dpkg::Use-Pty=0 \
-            mingw-w64 p7zip-full zip
-            
+          # Verify Ubuntu's APT sources use the mirror list.
+          if ! grep -RqsF \
+            "mirror+file:/etc/apt/apt-mirrors.txt" \
+            /etc/apt/sources.list.d/; then
+            echo "::error::APT mirror list is not configured"
+            exit 1
+          fi
+
+          APT_OPTS=(
+            -o Acquire::Retries=0
+            -o Acquire::http::Timeout=15
+            -o Acquire::https::Timeout=15
+            -o APT::Update::Error-Mode=any
+            -o DPkg::Lock::Timeout=120
+            -o Dpkg::Use-Pty=0
+          )
+
+          # Stop a command after 30 seconds without output.
+          run_with_idle_timeout() {
+            python3 - "$@" <<'PY'
+          import os
+          import selectors
+          import signal
+          import subprocess
+          import sys
+          import time
+
+          proc = subprocess.Popen(
+              sys.argv[1:],
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+              start_new_session=True,
+          )
+
+          selector = selectors.DefaultSelector()
+          selector.register(proc.stdout, selectors.EVENT_READ)
+          last_output = time.monotonic()
+
+          while selector.get_map():
+              events = selector.select(timeout=1)
+
+              for key, _ in events:
+                  data = os.read(key.fd, 65536)
+                  if data:
+                      sys.stdout.buffer.write(data)
+                      sys.stdout.buffer.flush()
+                      last_output = time.monotonic()
+                  else:
+                      selector.unregister(key.fileobj)
+
+              if time.monotonic() - last_output >= 30:
+                  print(
+                      "\n::warning::No output for 30 seconds. Switching mirror.",
+                      file=sys.stderr,
+                      flush=True,
+                  )
+                  try:
+                      os.killpg(proc.pid, signal.SIGTERM)
+                  except ProcessLookupError:
+                      pass
+
+                  try:
+                      proc.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      try:
+                          os.killpg(proc.pid, signal.SIGKILL)
+                      except ProcessLookupError:
+                          pass
+                      proc.wait()
+
+                  sys.exit(124)
+
+          sys.exit(proc.wait())
+          PY
+          }
+
+          downloaded=false
+
+          for mirror in "${mirrors[@]}"; do
+            echo "::group::Trying Ubuntu mirror: $mirror"
+
+            # Use only this mirror for the current attempt.
+            printf '%s\n' "$mirror" | \
+              sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+
+            if run_with_idle_timeout \
+                sudo -E timeout 240 \
+                apt-get "${APT_OPTS[@]}" update \
+              && run_with_idle_timeout \
+                sudo -E timeout 480 \
+                apt-get "${APT_OPTS[@]}" install -y \
+                  --download-only \
+                  --no-install-recommends \
+                  mingw-w64 p7zip-full zip; then
+
+              downloaded=true
+              echo "Successfully downloaded dependencies"
+              echo "::endgroup::"
+              break
+            fi
+
+            echo "::warning::Mirror failed: $mirror"
+            echo "::endgroup::"
+          done
+
+          if [ "$downloaded" != true ]; then
+            echo "::error::All Ubuntu mirrors failed"
+            exit 1
+          fi
+
+          # Packages are already downloaded.
+          # Do not interrupt dpkg with the inactivity watchdog.
+          sudo -E timeout 300 \
+            apt-get "${APT_OPTS[@]}" install -y \
+              --no-download \
+              --no-install-recommends \
+              mingw-w64 p7zip-full zip
+
       - name: Create vendor directory and download Reloaded-II
         run: |
           mkdir -p vendor/reloaded-release/extracted
