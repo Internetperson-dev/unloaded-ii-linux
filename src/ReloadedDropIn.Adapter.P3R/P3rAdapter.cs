@@ -4,7 +4,9 @@ namespace ReloadedDropIn.Adapter.P3R;
 
 /// <summary>
 /// Persona 3 Reload (PC, Steam). UE4 4.27 title driven by UnrealEssentials +
-/// p3rpc.essentials. Like P5R, detection + required-mod naming is all we do.
+/// p3rpc.essentials. Like P5R, the adapter detects the game and declares the
+/// required mod stack; p3rpc.essentials handles runtime redirection so no
+/// on-disk archive rewrites or backups are needed.
 /// </summary>
 public sealed class P3rAdapter : IGameAdapter
 {
@@ -96,11 +98,21 @@ public sealed class P3rAdapter : IGameAdapter
 
     public InjectionConfiguration GetInjectionConfiguration(AdapterContext context) => new()
     {
-        PreferredProxyDll = "WINMM.dll",
+        PreferredProxyDll = "winmm.dll",
         WineDllOverride = "winmm=n,b",
     };
 
-    public IReadOnlyList<string> GetDisposableModStatePaths(AdapterContext context) => [];
+    /// <summary>
+    /// p3rpc.essentials stores merged mod outputs in a Cache directory. It is
+    /// recreated automatically, so invalidate it whenever the active mod set
+    /// changes rather than risk retaining output from a removed mod.
+    /// </summary>
+    public IReadOnlyList<string> GetDisposableModStatePaths(AdapterContext context)
+    {
+        var loader = new Core.Discovery.ModScanner().Scan(context.ModsDirectory).Mods
+            .FirstOrDefault(m => m.ModId.Equals(ModLoaderModId, StringComparison.OrdinalIgnoreCase));
+        return loader is null ? [] : [Path.Combine(loader.Directory, "Cache")];
+    }
 
     public Task<IReadOnlyList<string>> AfterGenerateConfigurationAsync(
         AdapterContext context, CancellationToken cancellationToken) =>

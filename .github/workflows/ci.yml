@@ -2,26 +2,36 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 9.0.x
+          global-json-file: global.json
 
-      - name: Restore
+      - name: Restore dependencies
         run: dotnet restore
 
       - name: Build
-        run: dotnet build --no-restore -c Release -p:EnableWindowsTargeting=true
+        run: dotnet build --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test --no-build -c Release -v normal
+        run: dotnet test --no-build --configuration Release --logger "trx;LogFileName=test_results.trx" --results-directory ./TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/
+          retention-days: 7
