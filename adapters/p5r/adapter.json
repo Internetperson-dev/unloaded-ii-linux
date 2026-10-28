@@ -15,9 +15,10 @@
     "note": "winmm verified to load the base stack and overlay under Proton"
   },
   "requiredMods": [
-    { "id": "p5rpc.modloader", "enabled": true },
+    { "id": "p5rpc.modloader", "enabled": true }, 
     { "id": "p3rpc.gui.AreWeModded", "enabled": true },
     { "id": "p5rpc.performancefix", "enabled": true },
+    { "id": "p5rpc.fpsUnlocker", "enabled": true },
     { "id": "reloaded.sharedlib.hooks", "enabled": false },
     { "id": "Reloaded.Memory.SigScan.ReloadedII", "enabled": false },
     { "id": "crifs.v2.hook", "enabled": false },
