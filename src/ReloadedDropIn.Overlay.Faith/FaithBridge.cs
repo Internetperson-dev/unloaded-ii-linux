@@ -99,6 +99,7 @@ internal sealed class FaithOverlayImGui(IImGui imgui) : IOverlayImGui
         }
     }
 
+    public void SetScale(float scale) => imgui.GetIO().FontGlobalScale = scale;
     public void SetMouseDrawCursor(bool enabled)
     {
         // Faith owns input/cursor state for its menu. Only request a software

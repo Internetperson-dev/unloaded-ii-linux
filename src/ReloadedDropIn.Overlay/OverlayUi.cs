@@ -22,6 +22,7 @@ public sealed class OverlayUi(
     private readonly IOverlayImGui _imgui = imgui;
     private bool _visible;
     private bool _catalogLoaded;
+    private bool _scaleApplied;
     private bool _insertHeld;
     private bool _pendingRelaunchChanges;
     private string? _lastSaveError;
@@ -49,6 +50,12 @@ public sealed class OverlayUi(
         {
             SafeReload();
             _catalogLoaded = true;
+        }
+
+        if (!_scaleApplied)
+        {
+            _imgui.SetScale(2.0f);
+            _scaleApplied = true;
         }
 
         RenderWatermark();

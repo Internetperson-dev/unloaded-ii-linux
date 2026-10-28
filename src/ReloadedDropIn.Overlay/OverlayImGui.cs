@@ -12,6 +12,7 @@ namespace ReloadedDropIn.Overlay;
 public interface IOverlayImGui
 {
     Vector2 DisplaySize { get; }
+    void SetScale(float scale);
     void SetMouseDrawCursor(bool enabled);
     bool Begin(string title, ref bool open, int flags);
     void End();
@@ -36,11 +37,6 @@ public interface IOverlayImGui
 
 internal sealed unsafe class DearOverlayImGui : IOverlayImGui
 {
-    public DearOverlayImGui()
-    {
-        DearImGui.GetIO().FontGlobalScale = 2.0f;
-    }
-
     public Vector2 DisplaySize
     {
         get
@@ -50,6 +46,7 @@ internal sealed unsafe class DearOverlayImGui : IOverlayImGui
         }
     }
 
+    public void SetScale(float scale) => DearImGui.GetIO().FontGlobalScale = scale;
     public void SetMouseDrawCursor(bool enabled) => DearImGui.GetIO().MouseDrawCursor = enabled;
     public bool Begin(string title, ref bool open, int flags) => DearImGui.Begin(title, ref open, flags);
     public void End() => DearImGui.End();
