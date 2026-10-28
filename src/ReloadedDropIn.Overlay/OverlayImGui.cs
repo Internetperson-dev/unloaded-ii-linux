@@ -36,6 +36,11 @@ public interface IOverlayImGui
 
 internal sealed unsafe class DearOverlayImGui : IOverlayImGui
 {
+    public DearOverlayImGui()
+    {
+        DearImGui.GetIO().FontGlobalScale = 2.0f;
+    }
+
     public Vector2 DisplaySize
     {
         get
