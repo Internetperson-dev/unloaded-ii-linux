@@ -29,7 +29,7 @@
 #define DROPIN_MAX_PATH 4096
 
 /* ------------------------------------------------------------------ */
-/* hostfxr ABI (stable, documented in dotnet/runtime native hosting)   */
+/* hostfxr ABI (stable, documented in dotnet/runtime native hosting)  */
 /* ------------------------------------------------------------------ */
 
 #define HDT_LOAD_ASSEMBLY_AND_GET_FUNCTION_POINTER 5
@@ -65,7 +65,7 @@ typedef struct EntryPointParameters
 } EntryPointParameters;
 
 /* ------------------------------------------------------------------ */
-/* Globals                                                             */
+/* Globals                                                            */
 /* ------------------------------------------------------------------ */
 
 static HMODULE g_module;
@@ -103,7 +103,7 @@ static void __cdecl hostfxr_error_to_log(const wchar_t *message)
 }
 
 /* ------------------------------------------------------------------ */
-/* Small path helpers (no shlwapi dependency)                          */
+/* Small path helpers (no shlwapi dependency)                         */
 /* ------------------------------------------------------------------ */
 
 static void path_combine(wchar_t *destination, const wchar_t *base, const wchar_t *relative)
@@ -171,14 +171,14 @@ static int is_reloaded_already_loaded(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Entry-point hold                                                    */
-/*                                                                     */
+/* Entry-point hold                                                   */
+/*                                                                    */
 /* We are loaded during process initialization, before the exe's entry */
 /* point runs. Mod configuration and file-redirect hooks must be live  */
-/* BEFORE the game reads its archive index, or mods silently no-op.    */
-/* So: patch the entry point into a 2-byte spin (EB FE), bootstrap on  */
-/* our thread, then restore the original bytes. If we're somehow       */
-/* loaded late (entry already ran), the patch is inert and harmless.   */
+/* BEFORE the game reads its archive index, or mods silently no-op.   */
+/* So: patch the entry point into a 2-byte spin (EB FE), bootstrap on */
+/* our thread, then restore the original bytes. If we're somehow      */
+/* loaded late (entry already ran), the patch is inert and harmless.  */
 /* ------------------------------------------------------------------ */
 
 static void hold_game_at_entry(void)
@@ -226,29 +226,43 @@ static void release_game_entry(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Bootstrap                                                           */
+/* Bootstrap                                                          */
 /* ------------------------------------------------------------------ */
 
 static void bootstrap(void);
 
+#if defined(__GNUC__) || defined(__clang__)
+static void cleanup_bootstrap(void *arg)
+{
+    (void)arg;
+    release_game_entry();
+    if (g_log)
+        fflush(g_log);
+}
+#endif
+
 static DWORD WINAPI bootstrap_thread(LPVOID parameter)
 {
     (void)parameter;
-    /* Use SEH so release_game_entry() is guaranteed to run even if bootstrap()
-       crashes (native fault in hostfxr, CoreCLR, or Reloaded's loader).
-       Without this, a crash leaves the game entry point patched to a spin
-       loop forever: the process runs but no window ever appears. */
+    
+#if defined(__GNUC__) || defined(__clang__)
+    /* GCC/Clang attribute-based scope cleanup */
+    __attribute__((cleanup(cleanup_bootstrap))) int guard = 0;
+    bootstrap();
+#else
+    /* MSVC Structured Exception Handling */
     __try
     {
         bootstrap();
     }
     __finally
     {
-        /* The game must ALWAYS resume, whether we succeeded or bailed out. */
         release_game_entry();
         if (g_log)
             fflush(g_log);
     }
+#endif
+
     return 0;
 }
 
@@ -279,7 +293,6 @@ __declspec(dllexport) void InitializeASI(void)
 
 static void bootstrap(void)
 {
-
     /* Resolve where we are; the .asi sits in the game root. */
     if (!GetModuleFileNameW(g_module, g_module_path, DROPIN_MAX_PATH))
         return;
@@ -465,7 +478,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         DisableThreadLibraryCalls(instance);
 
         /* Freeze the game at its entry point until mods are ready; the
-           bootstrap thread releases it on every exit path. */
+            bootstrap thread releases it on every exit path. */
         hold_game_at_entry();
 
         g_bootstrap_thread = CreateThread(NULL, 0, bootstrap_thread, NULL, 0, NULL);
