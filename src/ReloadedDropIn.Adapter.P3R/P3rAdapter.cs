@@ -105,7 +105,7 @@ public sealed class P3rAdapter : IGameAdapter
         // downloaded and the mod stack could fail to load.
         new RequiredMod
         {
-            Id = "reloaded.universal.fileemulationframework", Enabled = false,
+            Id = "reloaded.universal.fileemulationframework", Enabled = true,
             UpdateRepo = "Sewer56/FileEmulationFramework",
             UpdateAssetPrefix = "FileEmulationFramework",
         },
