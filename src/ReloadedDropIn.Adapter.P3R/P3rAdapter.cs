@@ -20,11 +20,19 @@ public sealed class P3rAdapter : IGameAdapter
 
     public GameDetectionResult Detect(AdapterContext context)
     {
+        // Check the directory that hosts the .asi (derived by the native bootstrap
+        // from g_module_path). For P3R the executable can sit one level above
+        // the binary directory where the loader sometimes places the .asi.
         foreach (var executable in ExecutableNames)
         {
             var path = Path.Combine(context.GameDirectory, executable);
             if (File.Exists(path))
                 return GameDetectionResult.Detected(executable, path);
+
+            var parentPath = Path.Combine(context.GameDirectory, "..", executable);
+            parentPath = Path.GetFullPath(parentPath);
+            if (File.Exists(parentPath))
+                return GameDetectionResult.Detected(executable, parentPath);
         }
 
         return GameDetectionResult.NotDetected;
@@ -46,7 +54,9 @@ public sealed class P3rAdapter : IGameAdapter
                 $"mods directory does not exist yet: {context.ModsDirectory}"));
         }
 
-        if (!File.Exists(Path.Combine(context.GameDirectory, "P3RE.dll")))
+        var detection = Detect(context);
+        var gameRoot = detection.IsDetected ? Path.GetDirectoryName(detection.ExecutablePath) ?? context.GameDirectory : context.GameDirectory;
+        if (!File.Exists(Path.Combine(gameRoot, "P3RE.dll")))
         {
             messages.Add(new ValidationMessage(ValidationSeverity.Warning, "p3re",
                 "P3R Enhanced mod is missing (P3RE.dll not found in game directory); " +
