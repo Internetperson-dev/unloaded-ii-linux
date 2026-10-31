@@ -84,15 +84,16 @@ public class P3rAdapterTests : IDisposable
         // p3rpc.essentials is the only user-facing enabled mod; its UE4
         // dependencies are enabled as required stack mods but not user toggles.
         var userEnabled = required.Where(m => m.Enabled).ToList();
-        Assert.Equal(6, userEnabled.Count);
+        Assert.Equal(7, userEnabled.Count);
         Assert.Contains(userEnabled, m => m.Id == P3rAdapter.ModLoaderModId);
         Assert.Contains(userEnabled, m => m.Id == "UnrealEssentials");
         Assert.Contains(userEnabled, m => m.Id == "UTOC.Stream.Emulator");
         Assert.Contains(userEnabled, m => m.Id == "reloaded.sharedlib.hooks");
         Assert.Contains(userEnabled, m => m.Id == "Reloaded.Memory.SigScan.ReloadedII");
         Assert.Contains(userEnabled, m => m.Id == "reloaded.universal.fileemulationframework");
+        Assert.Contains(userEnabled, m => m.Id == "p3rpc.UE4SS.Reloaded-SSAO");
 
-        Assert.Equal(6, required.Count);
+        Assert.Equal(7, required.Count);
     }
 
     [Fact]
