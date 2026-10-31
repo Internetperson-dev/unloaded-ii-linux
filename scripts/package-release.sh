@@ -46,7 +46,7 @@ echo "==> checking inputs"
 [ -f "$VENDOR/extracted/Loader/X64/Reloaded.Mod.Loader.dll" ] || {
   echo "Reloaded release not extracted; run:"
   echo "  curl -sL -o $VENDOR/Release.zip https://github.com/Reloaded-Project/Reloaded-II/releases/download/$RELOADED_VERSION/Release.zip"
-  echo "  unzip -q $VENDOR/Release.zip -d $VENDOR/extracted"
+  echo "  unzip -qo $VENDOR/Release.zip -d $VENDOR/extracted"
   exit 1
 }
 [ -f "$VENDOR/extracted/LICENSE.txt" ] || {

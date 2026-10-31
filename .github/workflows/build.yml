@@ -168,7 +168,7 @@ jobs:
           mkdir -p vendor/reloaded-release/extracted
           curl -sL -o vendor/reloaded-release/Release.zip \
             https://github.com/Reloaded-Project/Reloaded-II/releases/download/1.30.2/Release.zip
-          unzip -q vendor/reloaded-release/Release.zip -d vendor/reloaded-release/extracted
+          unzip -qo vendor/reloaded-release/Release.zip -d vendor/reloaded-release/extracted
 
       - name: Download .NET Desktop Runtime
         run: |
