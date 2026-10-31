@@ -129,6 +129,16 @@ public sealed class SyncRunner
                 .ToDictionary(m => m.ModId, m => m.Directory, StringComparer.OrdinalIgnoreCase);
 
             IReadOnlyList<DiscoveredMod> usableMods = scan.Mods;
+            // P3R renders through Direct3D 12 (P3RE's DX12 swapchain). The universal
+            // overlay backend is Direct3D 11 only and crashes when installed there.
+            if (adapter is Adapter.P3R.P3rAdapter)
+            {
+                usableMods = scan.Mods
+                    .Where(mod => !mod.ModId.Equals("reloaded.dropin.overlay", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                Log("[dropin.overlay] disabled for P3R (Direct3D 12); overlay excluded from launch plan");
+            }
+
             if (!faithDx12Ready)
             {
                 usableMods = scan.Mods
