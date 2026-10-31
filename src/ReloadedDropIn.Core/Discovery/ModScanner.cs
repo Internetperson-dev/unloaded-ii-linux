@@ -58,6 +58,18 @@ public sealed class ModScanner
         directoryName.EndsWith(".CPK", StringComparison.OrdinalIgnoreCase)
         || GameContentRootNames.Contains(directoryName);
 
+    /// <summary>
+    /// Directories BaseModInstaller uses while swapping a base-mod install.
+    /// They contain a complete ModConfig.json but are not installed mods: a
+    /// leftover from a killed update must never be scanned, or the next update
+    /// targets the staging folder and nests a second staging sibling inside it.
+    /// </summary>
+    private static readonly string[] UpdaterWorkSuffixes = [".update-staging", ".update-old"];
+
+    public static bool IsUpdaterWorkDirectory(string directoryName) =>
+        UpdaterWorkSuffixes.Any(suffix =>
+            directoryName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+
     public ScanResult Scan(string modsDirectory)
     {
         var mods = new List<DiscoveredMod>();
@@ -138,6 +150,15 @@ public sealed class ModScanner
 
         foreach (var subdirectory in subdirectories)
         {
+            if (IsUpdaterWorkDirectory(Path.GetFileName(subdirectory)))
+            {
+                issues.Add(new ScanIssue(
+                    ScanIssueKind.IgnoredEntry,
+                    subdirectory,
+                    "updater staging directory (not an installed mod)"));
+                continue;
+            }
+
             var manifestPath = Path.Combine(subdirectory, ModManifest.FileName);
 
             if (File.Exists(manifestPath))

@@ -64,6 +64,9 @@ echo "==> checking inputs"
 echo "==> building native .asi"
 "$ROOT/src/native/dropin-asi/build.sh" "$ROOT/dist/native"
 
+echo "==> building D3D12 overlay bridge"
+"$ROOT/src/native/dropin-overlay/build.sh" "$ROOT/dist/native-overlay"
+
 echo "==> publishing managed bootstrap"
 dotnet publish "$ROOT/src/ReloadedDropIn.Bootstrap" -c Release -o "$ROOT/dist/bootstrap-publish" \
   --no-restore --disable-build-servers -p:UseSharedCompilation=false -p:NuGetAudit=false \
@@ -125,6 +128,11 @@ cp -R "$ROOT/dist/bootstrap-publish/." "$STAGE/reloaded-dropin/bootstrap/"
 # stamped from VERSION (numeric part) so the panel always shows the real one.
 mkdir -p "$STAGE/mods/_base-mods/reloaded.dropin.overlay"
 cp -R "$ROOT/dist/overlay-publish/." "$STAGE/mods/_base-mods/reloaded.dropin.overlay/"
+# Native D3D12/D3D11 ImGui renderer for games the managed D3D11 hook cannot
+# cover (P3R). Kept beside the overlay assembly; the P/Invoke resolver finds it
+# there without polluting the game directory.
+cp "$ROOT/dist/native-overlay/DropInOverlay.dll" \
+  "$STAGE/mods/_base-mods/reloaded.dropin.overlay/"
 # Loaded reflectively only on FFXVI after Faith has exported its ImGui
 # controllers. Keeping this side assembly out of the main overlay's type table
 # lets GBFR/P5R load without Faith or NenTools being present.

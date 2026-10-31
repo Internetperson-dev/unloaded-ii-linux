@@ -32,7 +32,9 @@ public class Program : IModV2, IExports
     private CursorLiberator? _cursorLiberator;
     private bool _hooked;
     private Action<bool>? _setFaithComponentEnabled;
-    private UniversalHookDx12.RenderCallback? _universalRenderCallback;
+    private DropInOverlayNative.RenderCallback? _nativeRenderCallback;
+    private DropInOverlayNative.Config _nativeConfig;
+    private bool _nativeStarted;
 
     public void StartEx(IModLoaderV1 loader, IModConfigV1 config)
     {
@@ -52,51 +54,7 @@ public class Program : IModV2, IExports
 
             if (OverlayRendererPolicy.IsDirect3D12Only(executableName))
             {
-                // Try the universal D3D12 hook first (P3RE/DX12 compatible); fall
-                // back to disabled if the binary isn't present.
-                var universalPath = Path.Combine(gameDirectory, "Universal-ImGui-Hook.dll");
-                if (!File.Exists(universalPath))
-                    universalPath = Path.Combine(gameDirectory, "reloaded-dropin", "Universal-ImGui-Hook.dll");
-                if (!File.Exists(universalPath))
-                    universalPath = Path.GetFullPath(Path.Combine(typeof(Program).Assembly.Location, "..", "Universal-ImGui-Hook.dll"));
-
-                if (File.Exists(universalPath))
-                {
-                    try
-                    {
-                        _ui = new OverlayUi(
-                            gameDirectory,
-                            new DearOverlayImGui(),
-                            message => logger.WriteLine($"[dropin.overlay] {message}"));
-
-                        _universalRenderCallback = _ui.Render;
-                        var renderPtr = Marshal.GetFunctionPointerForDelegate(_universalRenderCallback);
-                        var cfg = new UniversalHookDx12.Config
-                        {
-                            module = Marshal.GetHINSTANCE(typeof(Program).Assembly.GetModules()[0]),
-                            backend = (int)UniversalHookDx12.Backend.None,
-                            menuKey = 0x2D, // VK_INSERT
-                            unloadKey = 0x76, // VK F11
-                            menuButtons = 0,
-                            scale = 0.0f,
-                            debugLog = true,
-                            remoteControl = false,
-                            remotePipe = "",
-                            render = renderPtr,
-                            setup = IntPtr.Zero,
-                        };
-                        UniversalHookDx12.Start(ref cfg);
-                        logger.WriteLine($"[dropin.overlay] Universal hook DLL loaded from {universalPath} and started (D3D12 backend).");
-                        return;
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.WriteLine($"[dropin.overlay] universal hook load failed: {ex.Message}");
-                    }
-                }
-
-                logger.WriteLine(
-                    "[dropin.overlay] this game renders with Direct3D 12; the universal hook DLL (Universal-ImGui-Hook.dll) was not found, so the INSERT panel is disabled. Place the DLL next to the executable or in reloaded-dropin/ to enable it.");
+                StartDirect3D12Overlay(logger, gameDirectory);
                 return;
             }
 
@@ -162,6 +120,60 @@ public class Program : IModV2, IExports
         }
     }
 
+    private void StartDirect3D12Overlay(ILogger logger, string gameDirectory)
+    {
+        if (!DropInOverlayNative.IsAvailable)
+        {
+            logger.WriteLine(
+                "[dropin.overlay] this game renders with Direct3D 12, but DropInOverlay.dll is missing from the overlay mod folder; the INSERT panel is disabled.");
+            return;
+        }
+
+        try
+        {
+            _ui = new OverlayUi(
+                gameDirectory,
+                new NativeOverlayImGui(),
+                message => logger.WriteLine($"[dropin.overlay] {message}"),
+                handleToggleKey: false)
+            {
+                // uih owns the INSERT/F11 keys and tells us whether its menu is
+                // open; the panel follows that state instead of polling keys.
+                MenuOpenSource = () => DropInOverlayNative.DropInOverlay_IsMenuOpen() != 0,
+            };
+
+            _nativeRenderCallback = _ui.Render;
+            _nativeConfig = new DropInOverlayNative.Config
+            {
+                Backend = 0, // uih::Backend::None: detect D3D12/D3D11 from the first presented frame
+                MenuKey = 0x2D, // VK_INSERT
+                UnloadKey = 0x76, // VK_F11
+                MenuButtons = 0,
+                Scale = 2.0f,
+                DebugLog = 1,
+                RemoteControl = 0,
+                RemotePipe = "unloaded-ii",
+                Render = Marshal.GetFunctionPointerForDelegate(_nativeRenderCallback),
+                Setup = IntPtr.Zero,
+            };
+
+            StartNativeHook();
+            logger.WriteLine(
+                "[dropin.overlay] native D3D12 hook started (Universal-Dear-ImGui-Hook) — press INSERT in-game.");
+        }
+        catch (Exception ex)
+        {
+            _ui = null;
+            logger.WriteLine($"[dropin.overlay] native D3D12 hook failed: {ex.Message}");
+        }
+    }
+
+    private void StartNativeHook()
+    {
+        DropInOverlayNative.DropInOverlay_Start(ref _nativeConfig);
+        _nativeStarted = true;
+    }
+
     private void StartFaithOverlay(IModLoader loader, ILogger logger, string gameDirectory)
     {
         try
@@ -195,6 +207,11 @@ public class Program : IModV2, IExports
     public void Suspend()
     {
         _setFaithComponentEnabled?.Invoke(false);
+        if (_nativeStarted)
+        {
+            DropInOverlayNative.DropInOverlay_Stop();
+            _nativeStarted = false;
+        }
         if (_hooked)
             ImguiHook.Disable();
     }
@@ -202,6 +219,18 @@ public class Program : IModV2, IExports
     public void Resume()
     {
         _setFaithComponentEnabled?.Invoke(true);
+        if (!_nativeStarted && _nativeConfig.Render != IntPtr.Zero)
+        {
+            try
+            {
+                StartNativeHook();
+            }
+            catch
+            {
+                // The next Reloaded resume retries; a failed restart must not
+                // take the game down.
+            }
+        }
         if (_hooked)
             ImguiHook.Enable();
     }

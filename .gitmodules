@@ -1,0 +1,3 @@
+[submodule "vendor/Universal-Dear-ImGui-Hook"]
+	path = vendor/Universal-Dear-ImGui-Hook
+	url = https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook.git

@@ -27,6 +27,13 @@ public sealed class OverlayUi(
     private bool _pendingRelaunchChanges;
     private string? _lastSaveError;
 
+    /// <summary>
+    /// When set, the renderer owns the toggle key and this supplies its current
+    /// menu state (the native uih D3D12 path). Null means OverlayUi polls INSERT
+    /// itself, which is what the Reloaded.Imgui.Hook D3D11 path uses.
+    /// </summary>
+    public Func<bool>? MenuOpenSource { get; init; }
+
     // Self-update download state (touched from the render thread + bg thread).
     private volatile int _downloadState; // 0=idle, 1=downloading, 2=done, 3=error
     private string _downloadStatus = "";
@@ -60,8 +67,17 @@ public sealed class OverlayUi(
 
         RenderWatermark();
 
-        if (handleToggleKey)
+        if (MenuOpenSource is not null)
+        {
+            var visible = MenuOpenSource();
+            if (visible && !_visible)
+                SafeReload();
+            _visible = visible;
+        }
+        else if (handleToggleKey)
+        {
             HandleToggleKey();
+        }
 
         // Games hide the hardware cursor; have ImGui draw a software cursor
         // while the panel is open so the mouse is usable. CursorLiberator's

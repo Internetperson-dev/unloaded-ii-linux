@@ -93,6 +93,9 @@ public sealed class BaseModInstaller(AdapterContext context, IReleaseFeed feed)
                 ?? new Core.Discovery.ModScanner().Scan(context.ModsDirectory).Mods
                     .ToDictionary(m => m.ModId, m => m.Directory, StringComparer.OrdinalIgnoreCase);
 
+            foreach (var line in RecoverAbandonedWorkDirectories())
+                log.Add(line);
+
             var installable = requiredMods
                 .Where(m => m.UpdateRepo is not null && m.UpdateAssetPrefix is not null)
                 .ToList();
@@ -145,6 +148,84 @@ public sealed class BaseModInstaller(AdapterContext context, IReleaseFeed feed)
         }
 
         return log;
+    }
+
+    /// <summary>
+    /// Cleans up the siblings InstallArchive creates. A game killed between the
+    /// directory moves leaves ".update-staging" (unverified payload) or
+    /// ".update-old" (the last working install, with the live directory gone).
+    /// The staging directory is never scanned as a mod (see ModScanner), so
+    /// without this pass the next update would install beside it and leave a
+    /// nested, permanently stale tree in mods/.
+    /// </summary>
+    private List<string> RecoverAbandonedWorkDirectories()
+    {
+        var lines = new List<string>();
+        if (!Directory.Exists(context.ModsDirectory))
+            return lines;
+
+        var pending = new Stack<string>();
+        try
+        {
+            foreach (var directory in Directory.EnumerateDirectories(context.ModsDirectory))
+                pending.Push(directory);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return lines;
+        }
+
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            var name = Path.GetFileName(directory);
+
+            if (Core.Discovery.ModScanner.IsUpdaterWorkDirectory(name))
+            {
+                // A crash after live -> .update-old but before staging -> live:
+                // the retired copy is the only working install. Put it back.
+                if (name.EndsWith(".update-old", StringComparison.OrdinalIgnoreCase))
+                {
+                    var target = directory[..^".update-old".Length];
+                    if (!Directory.Exists(target))
+                    {
+                        try
+                        {
+                            Directory.Move(directory, target);
+                            lines.Add($"recovered {Path.GetFileName(target)} from an interrupted update");
+                            continue;
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                            // Fall through and delete it if it cannot be restored.
+                        }
+                    }
+                }
+
+                try
+                {
+                    Directory.Delete(directory, recursive: true);
+                    lines.Add($"removed abandoned update directory {name}");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Next launch retries.
+                }
+                continue;
+            }
+
+            try
+            {
+                foreach (var child in Directory.EnumerateDirectories(directory))
+                    pending.Push(child);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Unreadable directory: leave it alone.
+            }
+        }
+
+        return lines;
     }
 
     private async Task<string> UpdateOneAsync(

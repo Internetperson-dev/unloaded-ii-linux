@@ -102,6 +102,25 @@ public class BaseModInstallerTests : IDisposable
     }
 
     [Fact]
+    public async Task RecoversInterruptedUpdateLeftovers()
+    {
+        _temp.CreateMod("game/mods/_base-mods/test.mod", "test.mod");
+        var staging = _temp.CreateMod("game/mods/_base-mods/test.mod.update-staging", "test.mod");
+        var retired = _temp.CreateMod("game/mods/_base-mods/other.mod.update-old", "other.mod");
+
+        var feed = new FakeFeed { Assets = [new ReleaseAsset("TestMod1.0.0.zip", "https://x/a.zip")] };
+
+        var log = await new BaseModInstaller(Context, feed).RunAsync([UpdatableMod()], CancellationToken.None);
+
+        Assert.Contains(log, l => l.Contains("removed abandoned update directory test.mod.update-staging"));
+        Assert.Contains(log, l => l.Contains("recovered other.mod from an interrupted update"));
+        Assert.False(Directory.Exists(staging));
+        Assert.False(Directory.Exists(retired));
+        Assert.True(File.Exists(Path.Combine(
+            Context.ModsDirectory, "_base-mods", "other.mod", "ModConfig.json")));
+    }
+
+    [Fact]
     public async Task LeavesUpToDateModAlone()
     {
         _temp.CreateMod("game/mods/_base-mods/test.mod", "test.mod"); // 1.0.0

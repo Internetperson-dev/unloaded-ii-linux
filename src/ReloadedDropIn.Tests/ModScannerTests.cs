@@ -5,6 +5,25 @@ namespace ReloadedDropIn.Tests;
 public class ModScannerTests
 {
     [Fact]
+    public void UpdaterStagingDirectoriesAreNotMods()
+    {
+        using var temp = new TempDirectory();
+        temp.CreateMod("mods/_base-mods/RealMod", "real.mod");
+        // Leftovers from an interrupted base-mod update: both contain a valid
+        // ModConfig.json but must never enter the scan, or the next update
+        // installs inside the staging folder and nests another one.
+        temp.CreateMod("mods/_base-mods/RealMod.update-staging", "real.mod");
+        temp.CreateMod("mods/_base-mods/RealMod.update-old", "real.mod");
+
+        var result = new ModScanner().Scan(Path.Combine(temp.Path, "mods"));
+
+        var mod = Assert.Single(result.Mods);
+        Assert.EndsWith("RealMod", mod.Directory);
+        Assert.Equal(2, result.Issues.Count(
+            i => i.Kind == ScanIssueKind.IgnoredEntry && i.Reason.Contains("updater staging")));
+    }
+
+    [Fact]
     public void DiscoversModsAtTopLevelAndNested()
     {
         using var temp = new TempDirectory();
