@@ -10,6 +10,8 @@ public static class UniversalHookDx12
         None = 0, D3D9 = 1, D3D10 = 2, D3D11 = 3, D3D12 = 4, Vulkan = 5, OpenGL = 6
     }
 
+    public delegate void RenderCallback();
+
     [StructLayout(LayoutKind.Sequential)]
     public struct Config
     {

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 using Reloaded.Hooks.Definitions;
 using Reloaded.Imgui.Hook;
@@ -67,10 +68,23 @@ public class Program : IModV2, IExports
                             new DearOverlayImGui(),
                             message => logger.WriteLine($"[dropin.overlay] {message}"));
 
-                        logger.WriteLine($"[dropin.overlay] Universal hook DLL found at {universalPath}; load attempted (binary must be built separately on Windows).");
-                        // Full wiring requires building the DLL with MSVC/MinGW.
-                        // For now we note it's available but don't start the hook
-                        // until the binary is confirmed working.
+                        var renderCallback = new UniversalHookDx12.RenderCallback(_ui.Render);
+                        var renderPtr = Marshal.GetFunctionPointerForDelegate(renderCallback);
+                        var cfg = new UniversalHookDx12.Config
+                        {
+                            backend = (int)UniversalHookDx12.Backend.None,
+                            menuKey = 0x2D, // VK_INSERT
+                            unloadKey = 0x76, // VK_F11
+                            menuButtons = 0,
+                            scale = 2.0f,
+                            debugLog = true,
+                            remoteControl = false,
+                            remotePipe = "",
+                            render = renderPtr,
+                            setup = IntPtr.Zero,
+                        };
+                        UniversalHookDx12.Start(ref cfg);
+                        logger.WriteLine($"[dropin.overlay] Universal hook DLL loaded from {universalPath} and started (D3D12 backend).");
                         return;
                     }
                     catch (Exception ex)
