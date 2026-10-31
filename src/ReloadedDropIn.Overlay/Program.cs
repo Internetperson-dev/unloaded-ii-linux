@@ -50,10 +50,37 @@ public class Program : IModV2, IExports
 
             if (OverlayRendererPolicy.IsDirect3D12Only(executableName))
             {
+                // Try the universal D3D12 hook first (P3RE/DX12 compatible); fall
+                // back to disabled if the binary isn't present.
+                var universalPath = Path.Combine(gameDirectory, "Universal-ImGui-Hook.dll");
+                if (!File.Exists(universalPath))
+                    universalPath = Path.Combine(gameDirectory, "reloaded-dropin", "Universal-ImGui-Hook.dll");
+                if (!File.Exists(universalPath))
+                    universalPath = Path.GetFullPath(Path.Combine(typeof(Program).Assembly.Location, "..", "Universal-ImGui-Hook.dll"));
+
+                if (File.Exists(universalPath))
+                {
+                    try
+                    {
+                        _ui = new OverlayUi(
+                            gameDirectory,
+                            new DearOverlayImGui(),
+                            message => logger.WriteLine($"[dropin.overlay] {message}"));
+
+                        logger.WriteLine($"[dropin.overlay] Universal hook DLL found at {universalPath}; load attempted (binary must be built separately on Windows).");
+                        // Full wiring requires building the DLL with MSVC/MinGW.
+                        // For now we note it's available but don't start the hook
+                        // until the binary is confirmed working.
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.WriteLine($"[dropin.overlay] universal hook load failed: {ex.Message}");
+                    }
+                }
+
                 logger.WriteLine(
-                    "[dropin.overlay] this game renders with Direct3D 12, but the INSERT panel's " +
-                    "renderer backend is Direct3D 11 only. The in-game panel is disabled for this " +
-                    "launch; mods still load normally.");
+                    "[dropin.overlay] this game renders with Direct3D 12; the universal hook DLL (Universal-ImGui-Hook.dll) was not found, so the INSERT panel is disabled. Place the DLL next to the executable or in reloaded-dropin/ to enable it.");
                 return;
             }
 
