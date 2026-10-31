@@ -133,6 +133,13 @@ public sealed class P3rAdapter : IGameAdapter
             UpdateRepo = "Sewer56/FileEmulationFramework",
             UpdateAssetPrefix = "FileEmulationFramework",
         },
+        // SSAO improvement for Persona 3 Reload — UE4SS Reloaded-II mod.
+        new RequiredMod
+        {
+            Id = "p3rpc.UE4SS.Reloaded-SSAO", Enabled = true,
+            UpdateRepo = "Internetperson-dev/p3rpc.UE4SS.Reloaded-SSAO",
+            UpdateAssetPrefix = "p3rpc.UE4SS.Reloaded",
+        },
     ];
 
     public InjectionConfiguration GetInjectionConfiguration(AdapterContext context) => new()
