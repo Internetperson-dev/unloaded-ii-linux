@@ -5,6 +5,7 @@ using Reloaded.Hooks.Definitions;
 using Reloaded.Imgui.Hook;
 using Reloaded.Mod.Interfaces;
 using Reloaded.Mod.Interfaces.Internal;
+using ReloadedDropIn.Core.Overlay;
 
 namespace ReloadedDropIn.Overlay;
 
@@ -44,6 +45,15 @@ public class Program : IModV2, IExports
             if (FaithRendererExecutables.Contains(executableName, StringComparer.OrdinalIgnoreCase))
             {
                 StartFaithOverlay(loaderV2, logger, gameDirectory);
+                return;
+            }
+
+            if (OverlayRendererPolicy.IsDirect3D12Only(executableName))
+            {
+                logger.WriteLine(
+                    "[dropin.overlay] this game renders with Direct3D 12, but the INSERT panel's " +
+                    "renderer backend is Direct3D 11 only. The in-game panel is disabled for this " +
+                    "launch; mods still load normally.");
                 return;
             }
 
