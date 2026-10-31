@@ -28,19 +28,45 @@ fi
 GAME_ID="unknown"
 if   [ -f "$GAME_DIR/granblue_fantasy_relink.exe" ]; then GAME_ID="gbfr"
 elif [ -f "$GAME_DIR/P5R.exe" ]; then GAME_ID="p5r"
-elif [ -f "$GAME_DIR/P3R.exe" ]; then GAME_ID="p3r"
+# P3R is UE4: the drop-in is installed next to the executable in
+# P3R/Binaries/Win64, but an explicit install-root argument is accepted too.
+elif [ -f "$GAME_DIR/P3R.exe" ] || [ -f "$GAME_DIR/P3R/Binaries/Win64/P3R.exe" ] || [ -f "$GAME_DIR/Binaries/Win64/P3R.exe" ]; then GAME_ID="p3r"
 elif [ -f "$GAME_DIR/ffxvi.exe" ] || [ -f "$GAME_DIR/ffxvi_demo.exe" ]; then GAME_ID="ffxvi"
 elif [ -f "$GAME_DIR/Digimon Story Time Stranger.exe" ]; then GAME_ID="dsts"
 fi
 
-# game dir = <library>/steamapps/common/<game>; prefix lives at <library>/steamapps/compatdata/<appid>/pfx.
-# The app id is derived from the library's appmanifest that owns this install dir.
-STEAMAPPS="$(dirname "$(dirname "$GAME_DIR")")"
+# The prefix lives at <library>/steamapps/compatdata/<appid>/pfx. The game dir
+# is normally <library>/steamapps/common/<game>, but P3R's UE4 layout nests the
+# executable (and the drop-in) deeper, so walk up to steamapps instead of
+# assuming a fixed depth.
+STEAMAPPS=""
+_probe="$GAME_DIR"
+while [ -n "$_probe" ] && [ "$_probe" != "/" ]; do
+  if [ "$(basename "$_probe")" = "steamapps" ]; then
+    STEAMAPPS="$_probe"
+    break
+  fi
+  _probe="$(dirname "$_probe")"
+done
+[ -n "$STEAMAPPS" ] || STEAMAPPS="$(dirname "$(dirname "$GAME_DIR")")"
+
+# appmanifest installdir is the top-level folder under steamapps/common
+# (P3R, P5R, ...), even when GAME_DIR itself is nested deeper.
+INSTALL_NAME="$(basename "$GAME_DIR")"
+COMMON_DIR="$STEAMAPPS/common"
+case "$GAME_DIR/" in
+  "$COMMON_DIR"/*)
+    _rel="${GAME_DIR#"$COMMON_DIR"/}"
+    INSTALL_NAME="${_rel%%/*}"
+    ;;
+esac
+
+# The app id is derived from the library's appmanifest that owns this install.
 APPID="${2:-}"
 if [ -z "$APPID" ]; then
   for acf in "$STEAMAPPS"/appmanifest_*.acf; do
     [ -f "$acf" ] || continue
-    if grep -q "\"installdir\"[[:space:]]*\"$(basename "$GAME_DIR")\"" "$acf"; then
+    if grep -q "\"installdir\"[[:space:]]*\"$INSTALL_NAME\"" "$acf"; then
       APPID="$(basename "$acf" .acf)"; APPID="${APPID#appmanifest_}"
       break
     fi

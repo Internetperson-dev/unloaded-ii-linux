@@ -79,6 +79,8 @@ public sealed class ModCatalog(string gameDirectory)
     public void Reload()
     {
         Mods.Clear();
+        // The overlay runs inside the game, so gameDirectory is the folder
+        // holding P3R.exe (UE4: P3R/Binaries/Win64). P3RE.dll sits beside it.
         P3rEnhancedMissing = File.Exists(Path.Combine(gameDirectory, "P3R.exe"))
             && !File.Exists(Path.Combine(gameDirectory, "P3RE.dll"));
         var overrides = OverlayOverrides.Load(DropInDirectory);

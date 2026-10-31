@@ -30,6 +30,34 @@ public class P3rAdapterTests : IDisposable
     }
 
     [Fact]
+    public void DetectsP3rExecutableInUe4BinariesLayout()
+    {
+        // Tools (CLI, diagnostics) may be pointed at the Steam install root
+        // instead of the folder the drop-in is installed in.
+        var executable = Path.Combine(
+            Context.GameDirectory, "P3R", "Binaries", "Win64", "P3R.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+        File.WriteAllText(executable, "MZ");
+
+        var detection = new P3rAdapter().Detect(Context);
+
+        Assert.True(detection.IsDetected);
+        Assert.Equal("P3R.exe", detection.MatchedExecutable);
+        Assert.Equal(executable, detection.ExecutablePath);
+    }
+
+    [Fact]
+    public void DoesNotDetectExecutableInParentDirectory()
+    {
+        // The drop-in is installed beside the executable, never in a folder
+        // below it, so a parent lookup would only cause false positives.
+        Directory.CreateDirectory(Context.GameDirectory);
+        File.WriteAllText(Path.Combine(_temp.Path, "P3R.exe"), "MZ");
+
+        Assert.False(new P3rAdapter().Detect(Context).IsDetected);
+    }
+
+    [Fact]
     public void DoesNotDetectOtherGames()
     {
         Directory.CreateDirectory(Context.GameDirectory);
@@ -109,6 +137,34 @@ public class P3rAdapterTests : IDisposable
 
         Assert.Contains(result.Messages,
             m => m.Severity == ValidationSeverity.Warning && m.Check == "p3re");
+    }
+
+    [Fact]
+    public void ValidationAcceptsP3reDllBesideExecutable()
+    {
+        // This is the real install: the drop-in, P3R.exe and P3RE.dll all
+        // share P3R/Binaries/Win64.
+        Directory.CreateDirectory(Context.GameDirectory);
+        File.WriteAllText(Path.Combine(Context.GameDirectory, "P3R.exe"), "MZ");
+        File.WriteAllText(Path.Combine(Context.GameDirectory, "P3RE.dll"), "MZ");
+
+        var result = new P3rAdapter().ValidateInstallation(Context);
+
+        Assert.DoesNotContain(result.Messages, m => m.Check == "p3re");
+    }
+
+    [Fact]
+    public void ValidationFindsP3reDllNextToUe4Executable()
+    {
+        var executable = Path.Combine(
+            Context.GameDirectory, "P3R", "Binaries", "Win64", "P3R.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+        File.WriteAllText(executable, "MZ");
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(executable)!, "P3RE.dll"), "MZ");
+
+        var result = new P3rAdapter().ValidateInstallation(Context);
+
+        Assert.DoesNotContain(result.Messages, m => m.Check == "p3re");
     }
 
     [Fact]

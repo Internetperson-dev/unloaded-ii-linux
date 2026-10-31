@@ -18,21 +18,26 @@ public sealed class P3rAdapter : IGameAdapter
     public IReadOnlyList<string> ExecutableNames { get; } = ["P3R.exe"];
     public IReadOnlyList<uint> SteamAppIds { get; } = [2161700u];
 
+    /// <summary>
+    /// The drop-in is installed in the folder that holds the game executable.
+    /// P3R is UE4, so that folder is
+    /// &lt;install root&gt;\P3R\Binaries\Win64 rather than the Steam install
+    /// root. The nested form is also accepted so tools pointed at the install
+    /// root (CLI --game-dir, diagnostics) can still find the game.
+    /// </summary>
+    private static readonly string[] ExecutableRelativePaths =
+    [
+        "P3R.exe",
+        Path.Combine("P3R", "Binaries", "Win64", "P3R.exe"),
+    ];
+
     public GameDetectionResult Detect(AdapterContext context)
     {
-        // Check the directory that hosts the .asi (derived by the native bootstrap
-        // from g_module_path). For P3R the executable can sit one level above
-        // the binary directory where the loader sometimes places the .asi.
-        foreach (var executable in ExecutableNames)
+        foreach (var relativePath in ExecutableRelativePaths)
         {
-            var path = Path.Combine(context.GameDirectory, executable);
+            var path = Path.GetFullPath(Path.Combine(context.GameDirectory, relativePath));
             if (File.Exists(path))
-                return GameDetectionResult.Detected(executable, path);
-
-            var parentPath = Path.Combine(context.GameDirectory, "..", executable);
-            parentPath = Path.GetFullPath(parentPath);
-            if (File.Exists(parentPath))
-                return GameDetectionResult.Detected(executable, parentPath);
+                return GameDetectionResult.Detected(Path.GetFileName(path), path);
         }
 
         return GameDetectionResult.NotDetected;
@@ -42,10 +47,11 @@ public sealed class P3rAdapter : IGameAdapter
     {
         var messages = new List<ValidationMessage>();
 
-        if (!Detect(context).IsDetected)
+        var detection = Detect(context);
+        if (!detection.IsDetected)
         {
             messages.Add(new ValidationMessage(ValidationSeverity.Error, "executable",
-                $"none of [{string.Join(", ", ExecutableNames)}] found in {context.GameDirectory}"));
+                $"none of [{string.Join(", ", ExecutableRelativePaths)}] found under {context.GameDirectory}"));
         }
 
         if (!Directory.Exists(context.ModsDirectory))
@@ -54,9 +60,17 @@ public sealed class P3rAdapter : IGameAdapter
                 $"mods directory does not exist yet: {context.ModsDirectory}"));
         }
 
-        var detection = Detect(context);
-        var gameRoot = detection.IsDetected ? Path.GetDirectoryName(detection.ExecutablePath) ?? context.GameDirectory : context.GameDirectory;
-        if (!File.Exists(Path.Combine(gameRoot, "P3RE.dll")))
+        // P3R Enhanced is an ASI plugin, so it lives beside the game executable
+        // in the UE4 binary directory where the drop-in is installed. Also
+        // check context.GameDirectory so tools pointed at the install root work.
+
+        var executableDirectory = detection.ExecutablePath is null
+            ? null
+            : Path.GetDirectoryName(detection.ExecutablePath);
+        var p3rePresent =
+            (executableDirectory is not null && File.Exists(Path.Combine(executableDirectory, "P3RE.dll"))) ||
+            File.Exists(Path.Combine(context.GameDirectory, "P3RE.dll"));
+        if (!p3rePresent)
         {
             messages.Add(new ValidationMessage(ValidationSeverity.Warning, "p3re",
                 "P3R Enhanced mod is missing (P3RE.dll not found in game directory); " +

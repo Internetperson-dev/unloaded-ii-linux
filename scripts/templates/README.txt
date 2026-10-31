@@ -7,14 +7,24 @@ in on launch:
 
   - Granblue Fantasy: Relink
   - Persona 5 Royal
+  - Persona 3 Reload
   - Final Fantasy XVI
   - Digimon Story: Time Stranger
 
 INSTALL (Linux / Steam Deck / Proton)
 -------------------------------------
-1. Extract this archive into the game directory, next to the game's
-   executable (granblue_fantasy_relink.exe / P5R.exe / ffxvi.exe /
+1. Extract this archive next to the game's executable
+   (granblue_fantasy_relink.exe / P5R.exe / P3R.exe / ffxvi.exe /
    Digimon Story Time Stranger.exe).
+
+   For most games that is the Steam install folder. Persona 3 Reload is
+   UE4, so its executable lives one level deeper:
+
+     steamapps/common/P3R/P3R/Binaries/Win64/P3R.exe
+
+   Extract this archive into that Binaries/Win64 folder, not into
+   steamapps/common/P3R.
+
    You should end up with:
 
      <the game's .exe>
@@ -48,10 +58,10 @@ everything else in mods/ is yours.
 
 IN-GAME OVERLAY
 ---------------
-In Granblue Fantasy: Relink, Persona 5 Royal, and Digimon Story: Time
-Stranger, press INSERT in-game to open the Unloaded-II mod panel: see your
-mods, switch them on/off, and edit their settings. Changes apply on the
-next game launch.
+In Granblue Fantasy: Relink, Persona 5 Royal, Persona 3 Reload, and
+Digimon Story: Time Stranger, press INSERT in-game to open the
+Unloaded-II mod panel: see your mods, switch them on/off, and edit their
+settings. Changes apply on the next game launch.
 
 Final Fantasy XVI uses Faith Framework's overlay and UI APIs, with its
 DirectX 12 renderer replaced by a Proton-safe compatibility build downloaded
@@ -73,6 +83,13 @@ Persona 5 Royal — mods are served entirely at runtime through CriFs
 redirection; no game file is ever modified. Persona Essentials'
 disposable merge cache is cleared automatically when your mod set
 changes.
+
+Persona 3 Reload — mods are served entirely at runtime through
+UnrealEssentials and p3rpc.essentials; no game file is ever modified.
+Install this package in the UE4 binary folder
+(steamapps/common/P3R/P3R/Binaries/Win64), next to P3R.exe. P3R Enhanced
+(P3RE.dll) is expected beside the same executable; the overlay shows a
+banner if it is missing.
 
 Final Fantasy XVI — the mod loader packages your active mods as
 additive *.diff.pac archives in the game's data/ folder and rebuilds
@@ -120,12 +137,13 @@ what lets anyone actually fix the problem, so please include it.
 1. Close the game.
 
 2. Open a terminal and run the collector by its full path (replace the
-   path with wherever your game actually lives):
+   path with the folder that holds the game executable):
 
-     bash "/path/to/your/steamapps/common/<the game>/extras/collect-diagnostics.sh"
+     bash "/path/to/<folder with the game executable>/extras/collect-diagnostics.sh"
 
-   (If your terminal is already in the game's folder — the folder this
-   README is in — a plain  ./extras/collect-diagnostics.sh  works too.)
+   (If your terminal is already in that folder — the folder this README
+   is in — a plain  ./extras/collect-diagnostics.sh  works too. For
+   Persona 3 Reload the folder is .../P3R/P3R/Binaries/Win64.)
 
    It gathers every relevant log and config into a dropin-diagnostics.zip
    in the game folder, next to the executable. It collects logs and mod

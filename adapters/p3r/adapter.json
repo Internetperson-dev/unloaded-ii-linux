@@ -22,5 +22,5 @@
     { "id": "Reloaded.Memory.SigScan.ReloadedII", "enabled": true }
   ],
   "backups": [],
-  "notes": "UE4 4.27; modding goes through UnrealEssentials + p3rpc.essentials."
+  "notes": "UE4 4.27. The drop-in is installed next to the executable in P3R/Binaries/Win64 (not the Steam install root). Modding goes through UnrealEssentials + p3rpc.essentials."
 }
