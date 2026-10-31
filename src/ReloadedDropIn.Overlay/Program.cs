@@ -32,6 +32,7 @@ public class Program : IModV2, IExports
     private CursorLiberator? _cursorLiberator;
     private bool _hooked;
     private Action<bool>? _setFaithComponentEnabled;
+    private UniversalHookDx12.RenderCallback? _universalRenderCallback;
 
     public void StartEx(IModLoaderV1 loader, IModConfigV1 config)
     {
@@ -68,15 +69,16 @@ public class Program : IModV2, IExports
                             new DearOverlayImGui(),
                             message => logger.WriteLine($"[dropin.overlay] {message}"));
 
-                        var renderCallback = new UniversalHookDx12.RenderCallback(_ui.Render);
-                        var renderPtr = Marshal.GetFunctionPointerForDelegate(renderCallback);
+                        _universalRenderCallback = _ui.Render;
+                        var renderPtr = Marshal.GetFunctionPointerForDelegate(_universalRenderCallback);
                         var cfg = new UniversalHookDx12.Config
                         {
+                            module = Marshal.GetHINSTANCE(typeof(Program).Assembly.GetModules()[0]),
                             backend = (int)UniversalHookDx12.Backend.None,
                             menuKey = 0x2D, // VK_INSERT
-                            unloadKey = 0x76, // VK_F11
+                            unloadKey = 0x76, // VK F11
                             menuButtons = 0,
-                            scale = 2.0f,
+                            scale = 0.0f,
                             debugLog = true,
                             remoteControl = false,
                             remotePipe = "",
