@@ -51,13 +51,37 @@ public class P5rAdapterTests : IDisposable
     }
 
     [Fact]
-    public void OnlyTheModLoaderIsEnabled()
+    public void OnlyTheEssentialPersonaModsAreEnabled()
     {
         var required = new P5rAdapter().GetRequiredMods();
 
-        var enabled = Assert.Single(required, m => m.Enabled);
-        Assert.Equal(P5rAdapter.ModLoaderModId, enabled.Id);
-        Assert.Equal(14, required.Count);
+        // The P5R essentials: the mod loader plus the user-facing performance
+        // stack (FPS unlocker + performance fix) that must be enabled for the
+        // game to actually uncap / run well. Transitive Reloaded libraries are
+        // present-but-not-enabled (Reloaded pulls them in automatically once
+        // they exist).
+        var enabled = required.Where(m => m.Enabled).ToList();
+        Assert.Equal(3, enabled.Count);
+        Assert.Contains(P5rAdapter.ModLoaderModId, enabled.Select(m => m.Id));
+        Assert.Contains("p5rpc.fpsUnlocker", enabled.Select(m => m.Id));
+        Assert.Contains("p5rpc.performancefix", enabled.Select(m => m.Id));
+        Assert.Equal(16, required.Count);
+    }
+
+    [Fact]
+    public void FpsUnlockerAndPerformanceFixAreRequiredBaseMods()
+    {
+        var required = new P5rAdapter().GetRequiredMods();
+
+        var fpsUnlocker = Assert.Single(required, m => m.Id == "p5rpc.fpsUnlocker");
+        Assert.True(fpsUnlocker.Enabled);
+        Assert.Equal("AnimatedSwine37/p5rpc.fpsUnlocker", fpsUnlocker.UpdateRepo);
+        Assert.Equal("p5rpc.fpsUnlocker", fpsUnlocker.UpdateAssetPrefix);
+
+        var performanceFix = Assert.Single(required, m => m.Id == "p5rpc.performancefix");
+        Assert.True(performanceFix.Enabled);
+        Assert.Equal("amarret/p5r-mods", performanceFix.UpdateRepo);
+        Assert.Equal("p5rpc.performancefix", performanceFix.UpdateAssetPrefix);
     }
 
     [Fact]

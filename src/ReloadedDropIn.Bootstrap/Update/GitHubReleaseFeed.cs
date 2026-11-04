@@ -5,7 +5,7 @@ namespace ReloadedDropIn.Bootstrap.Update;
 
 /// <summary>
 /// GitHub releases API client. Unauthenticated (60 requests/hour/IP), which the
-/// once-per-week check throttle in <see cref="BaseModInstaller"/> stays far under.
+/// update-check interval in <see cref="BaseModInstaller"/> stays far under.
 /// Runs inside the game process while it's frozen at its entry point, so every
 /// timeout is deliberately short — an offline box must not stall the launch.
 ///

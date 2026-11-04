@@ -64,6 +64,22 @@ public sealed class P5rAdapter : IGameAdapter
             UpdateRepo = "Sewer56/p5rpc.modloader",
             UpdateAssetPrefix = "p5rpc.modloader",
         },
+        // …and the P5R performance stack that runs on top of the loader: the
+        // FPS unlocker (uncap the framerate via an ASMP hook) and the performance
+        // fix (frame pacing / busy-place FPS improvements). Both are required +
+        // enabled base mods, fetched from their official GitHub releases.
+        new RequiredMod
+        {
+            Id = "p5rpc.fpsUnlocker", Enabled = true,
+            UpdateRepo = "AnimatedSwine37/p5rpc.fpsUnlocker",
+            UpdateAssetPrefix = "p5rpc.fpsUnlocker",
+        },
+        new RequiredMod
+        {
+            Id = "p5rpc.performancefix", Enabled = true,
+            UpdateRepo = "amarret/p5r-mods",
+            UpdateAssetPrefix = "p5rpc.performancefix",
+        },
         // …and its transitive dependency closure. Present-but-not-enabled:
         // Reloaded pulls dependencies in automatically once they exist.
         new RequiredMod

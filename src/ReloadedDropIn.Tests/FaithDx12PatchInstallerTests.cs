@@ -101,6 +101,8 @@ public class FaithDx12PatchInstallerTests : IDisposable
         var cached = PortableExecutable(10);
         Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
         File.WriteAllBytes(CachePath, cached);
+        File.WriteAllText(BaseModInstaller.UpdateSettings.PathFor(Context.DropInDirectory),
+            JsonSerializer.Serialize(new { AutoUpdate = true, CheckIntervalHours = 168, LastCheckedUtc = DateTime.UtcNow }));
         File.WriteAllText(
             Path.Combine(Path.GetDirectoryName(CachePath)!, "update.json"),
             JsonSerializer.Serialize(new { LastCheckedUtc = DateTime.UtcNow }));

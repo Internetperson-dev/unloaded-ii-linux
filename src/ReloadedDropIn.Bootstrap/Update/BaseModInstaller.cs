@@ -18,8 +18,9 @@ namespace ReloadedDropIn.Bootstrap.Update;
 /// Constraints: runs pre-load inside the frozen game process, so it must be
 /// fast and failure-proof — any error (offline, rate limit, bad archive)
 /// leaves the installed state untouched and never blocks the launch. UPDATE
-/// checks are throttled via reloaded-dropin/update.json (default: once per
-/// week) and can be disabled there ("AutoUpdate": false); INSTALLING a missing
+/// checks run against the authors' GitHub releases on every launch (see
+/// <see cref="UpdateSettings.CheckIntervalHours"/>) and can be disabled via
+/// reloaded-dropin/update.json ("AutoUpdate": false); INSTALLING a missing
 /// base mod ignores both, since nothing works until it exists.
 /// </summary>
 public sealed class BaseModInstaller(AdapterContext context, IReleaseFeed feed)
@@ -28,10 +29,14 @@ public sealed class BaseModInstaller(AdapterContext context, IReleaseFeed feed)
     public sealed record UpdateSettings
     {
         public bool AutoUpdate { get; init; } = true;
-        // Weekly: base mods change rarely, and a stale check only delays an
-        // update, never blocks a missing-mod install (those bypass the
-        // throttle entirely).
-        public int CheckIntervalHours { get; init; } = 168;
+
+        /// <summary>
+        /// Hours between GitHub release checks for already-installed base mods.
+        /// 0 (the default) checks on every launch, so newly published upstream
+        /// releases are picked up immediately; a higher value re-throttles the
+        /// checks. Missing base mods are always fetched regardless of this.
+        /// </summary>
+        public int CheckIntervalHours { get; init; } = 0;
         public DateTime LastCheckedUtc { get; init; } = DateTime.MinValue;
 
         public static string PathFor(string dropInDirectory) => Path.Combine(dropInDirectory, "update.json");
@@ -78,8 +83,9 @@ public sealed class BaseModInstaller(AdapterContext context, IReleaseFeed feed)
     private static string Fmt(Version v) => v.Revision > 0 ? v.ToString() : v.ToString(3);
 
     /// <summary>
-    /// Installs missing base mods and (throttled) updates present ones.
-    /// Returns log lines; never throws.
+    /// <summary>
+    /// Installs missing base mods and updates present ones from the latest
+    /// GitHub releases. Returns log lines; never throws.
     /// </summary>
     public async Task<IReadOnlyList<string>> RunAsync(
         IReadOnlyList<RequiredMod> requiredMods, CancellationToken cancellationToken)
@@ -103,8 +109,10 @@ public sealed class BaseModInstaller(AdapterContext context, IReleaseFeed feed)
                 .Where(m => !modDirectories.ContainsKey(m.Id))
                 .ToList();
             var settings = UpdateSettings.Load(context.DropInDirectory);
-            var updatesDue = settings.AutoUpdate &&
-                DateTime.UtcNow - settings.LastCheckedUtc >= TimeSpan.FromHours(Math.Max(settings.CheckIntervalHours, 1));
+            var interval = settings.CheckIntervalHours > 0
+                ? TimeSpan.FromHours(settings.CheckIntervalHours)
+                : TimeSpan.Zero;
+            var updatesDue = settings.AutoUpdate && DateTime.UtcNow - settings.LastCheckedUtc >= interval;
 
             List<RequiredMod> toProcess;
             if (updatesDue)

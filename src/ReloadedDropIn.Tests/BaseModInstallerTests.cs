@@ -179,12 +179,23 @@ public class BaseModInstallerTests : IDisposable
         var feed = new FakeFeed { Assets = [] };
         var updater = new BaseModInstaller(Context, feed);
 
+        // Default: the interval is 0, i.e. check against GitHub on every launch.
         await updater.RunAsync([UpdatableMod()], CancellationToken.None);
         Assert.Equal(1, feed.FeedCalls);
 
         var log = await updater.RunAsync([UpdatableMod()], CancellationToken.None);
-        Assert.Equal(1, feed.FeedCalls); // no second network hit
-        Assert.Contains(log, l => l.Contains("skipping until the interval elapses"));
+        Assert.Equal(2, feed.FeedCalls); // no throttle by default anymore
+        Assert.DoesNotContain(log, l => l.Contains("skipping until the interval elapses"));
+
+        // An explicit interval re-throttles the update checks.
+        new BaseModInstaller.UpdateSettings { CheckIntervalHours = 168 }.Save(Context.DropInDirectory);
+        var throttled = new BaseModInstaller(Context, feed);
+        await throttled.RunAsync([UpdatableMod()], CancellationToken.None);
+        Assert.Equal(3, feed.FeedCalls);
+
+        var throttledLog = await throttled.RunAsync([UpdatableMod()], CancellationToken.None);
+        Assert.Equal(3, feed.FeedCalls); // no second network hit within the interval
+        Assert.Contains(throttledLog, l => l.Contains("skipping until the interval elapses"));
     }
 
     [Fact]

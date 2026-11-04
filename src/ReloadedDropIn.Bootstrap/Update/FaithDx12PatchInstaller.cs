@@ -44,7 +44,9 @@ public sealed class FaithDx12PatchInstaller(AdapterContext context, IReleaseFeed
 
             var state = LoadState();
             var updateSettings = BaseModInstaller.UpdateSettings.Load(context.DropInDirectory);
-            var interval = TimeSpan.FromHours(Math.Max(updateSettings.CheckIntervalHours, 1));
+            var interval = updateSettings.CheckIntervalHours > 0
+                ? TimeSpan.FromHours(updateSettings.CheckIntervalHours)
+                : TimeSpan.Zero;
             var cacheReady = IsValidPortableExecutable(cachePath);
             var checkDue = !cacheReady ||
                 (updateSettings.AutoUpdate && DateTime.UtcNow - state.LastCheckedUtc >= interval);

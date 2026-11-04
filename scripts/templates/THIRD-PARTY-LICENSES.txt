@@ -127,6 +127,16 @@ Persona 5 Royal
     License: GPL-3.0
     Source: https://github.com/Sewer56/p5rpc.modloader
 
+  p5rpc.fpsUnlocker
+    Author: AnimatedSwine37
+    License: GPL-3.0
+    Source: https://github.com/AnimatedSwine37/p5rpc.fpsUnlocker
+
+  p5rpc.performancefix
+    Author: Zelkin
+    License: GPL-3.0
+    Source: https://github.com/amarret/p5r-mods
+
   reloaded.sharedlib.hooks
     License: LGPL-3.0
     Source: https://github.com/Sewer56/Reloaded.SharedLib.Hooks.ReloadedII
