@@ -82,6 +82,7 @@ public class Program : IModV2, IExports
                 gameDirectory,
                 new DearOverlayImGui(),
                 message => logger.WriteLine($"[dropin.overlay] {message}"));
+            var ui = _ui;
 
             try
             {
@@ -103,7 +104,9 @@ public class Program : IModV2, IExports
                     await ImguiHook.Create(_ui.Render, new ImguiHookOptions
                     {
                         Implementations =
-                            [new ResilientImguiHookDx11(message => logger.WriteLine($"[dropin.overlay/dx11] {message}"))],
+                            [new ResilientImguiHookDx11(
+                                message => logger.WriteLine($"[dropin.overlay/dx11] {message}"),
+                                () => ui.ShouldRenderFrame())],
                     }).ConfigureAwait(false);
                     _hooked = true;
                     logger.WriteLine("[dropin.overlay] overlay ready — press INSERT in-game.");

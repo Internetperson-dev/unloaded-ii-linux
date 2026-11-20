@@ -51,22 +51,30 @@ public sealed class OverlayUi(
         ? _catalog.DropInVersion[..^4]
         : _catalog.DropInVersion;
 
-    public void Render()
+    /// <summary>
+    /// Cheap per-frame gate for the D3D11 Present hook. Polls the toggle input
+    /// without touching ImGui or the device, then reports whether this frame
+    /// actually has anything to draw. When the panel is closed and the
+    /// watermark is hidden the hook can skip ImGui entirely — on Wine/DXVK the
+    /// ImGui COM interop and empty draw pass cost several milliseconds a frame.
+    /// </summary>
+    public bool ShouldRenderFrame()
     {
-        if (!_catalogLoaded)
-        {
-            SafeReload();
-            _catalogLoaded = true;
-        }
+        EnsureCatalogLoaded();
+        PollToggleInput();
+        return _visible || !_catalog.HideWatermark;
+    }
 
-        if (!_scaleApplied)
-        {
-            _imgui.SetScale(2.0f);
-            _scaleApplied = true;
-        }
+    private void EnsureCatalogLoaded()
+    {
+        if (_catalogLoaded)
+            return;
+        SafeReload();
+        _catalogLoaded = true;
+    }
 
-        RenderWatermark();
-
+    private void PollToggleInput()
+    {
         if (MenuOpenSource is not null)
         {
             var visible = MenuOpenSource();
@@ -78,6 +86,26 @@ public sealed class OverlayUi(
         {
             HandleToggleKey();
         }
+
+        CursorLiberator.PanelOpen = _visible;
+    }
+
+    public void Render()
+    {
+        EnsureCatalogLoaded();
+
+        if (!_scaleApplied)
+        {
+            _imgui.SetScale(2.0f);
+            _scaleApplied = true;
+        }
+
+        RenderWatermark();
+
+        // The D3D11 hook already polls input in ShouldRenderFrame; the native
+        // D3D12 path does not, so keep the poll here for that renderer. It is
+        // idempotent for the D3D11 path (edge detection lives in _insertHeld).
+        PollToggleInput();
 
         // Games hide the hardware cursor; have ImGui draw a software cursor
         // while the panel is open so the mouse is usable. CursorLiberator's

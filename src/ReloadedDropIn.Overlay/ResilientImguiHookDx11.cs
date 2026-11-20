@@ -37,6 +37,8 @@ public sealed unsafe class ResilientImguiHookDx11 : IImguiHook
     public static ResilientImguiHookDx11? Instance { get; private set; }
 
     private readonly Action<string> _log;
+    private readonly Func<bool>? _shouldRender;
+
     private IHook<DX11Hook.Present>? _presentHook;
     private IHook<DX11Hook.ResizeBuffers>? _resizeBuffersHook;
     private RenderTargetView? _renderTargetView;
@@ -62,9 +64,15 @@ public sealed unsafe class ResilientImguiHookDx11 : IImguiHook
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hWnd);
 
-    public ResilientImguiHookDx11(Action<string> log)
+    /// <param name="shouldRender">
+    /// Called on every Present before any ImGui/device work. It must be cheap:
+    /// it polls the toggle input and returns false when the panel is closed and
+    /// the watermark is hidden, in which case we forward the frame untouched.
+    /// </param>
+    public ResilientImguiHookDx11(Action<string> log, Func<bool>? shouldRender = null)
     {
         _log = log;
+        _shouldRender = shouldRender;
     }
 
     public bool IsApiSupported() =>
@@ -83,6 +91,25 @@ public sealed unsafe class ResilientImguiHookDx11 : IImguiHook
     {
         if (_presentRecursionLock)
             return _presentHook!.OriginalFunction.Value.Invoke(swapChainPtr, syncInterval, flags);
+
+        // Idle frames must not pay for ImGui's new frame + draw pass. Polling
+        // the toggle key is a single GetAsyncKeyState call by comparison.
+        // A failure in the gate must never break the game's Present call.
+        if (_shouldRender is not null)
+        {
+            bool shouldRender;
+            try
+            {
+                shouldRender = _shouldRender();
+            }
+            catch (Exception ex)
+            {
+                LogOnce($"idle-frame check failed; rendering this frame: {ex.GetType().Name}: {ex.Message}");
+                shouldRender = true;
+            }
+            if (!shouldRender)
+                return _presentHook!.OriginalFunction.Value.Invoke(swapChainPtr, syncInterval, flags);
+        }
 
         _presentRecursionLock = true;
         try
