@@ -42,6 +42,11 @@ proof the loader is active; tick "Corner watermark" in the panel to keep it on
 screen permanently. Set `RELOADED_DROPIN_DISABLE_OVERLAY=1` in the launch
 environment to skip the overlay and all of its hooks entirely.
 
+In P5R, the FPS Unlocker's limit is seeded to 240 FPS when no user config exists.
+Change it in the INSERT panel under **Base mods > FPS Unlocker > settings > FPS
+Limit**; an existing value is never overwritten, and edits apply on the next
+game launch.
+
 ## Supported games
 
 One universal package (`./scripts/package-release.sh`) covers every supported

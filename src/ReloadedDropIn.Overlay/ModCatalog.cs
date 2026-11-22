@@ -45,7 +45,8 @@ public sealed record CatalogMod
     /// <summary>
     /// Editable user config (generated/User/Mods/&lt;id&gt;/Config.json), if any.
     /// Before the mod's first run that file doesn't exist yet, so it is seeded
-    /// from the Config.json the mod ships in its own folder, if present.
+    /// from the Config.json the mod ships in its own folder, the mod DLL's
+    /// defaults, or a known default (FPS unlocker: 240 FPS).
     /// </summary>
     public JsonObject? UserConfig { get; set; }
     public string? UserConfigPath { get; init; }
@@ -146,14 +147,15 @@ public sealed class ModCatalog(string gameDirectory)
 
             // Load config: user config first, then mod-shipped Config.json,
             // then extract defaults from the DLL's [Configurable] class.
-            var userConfig = TryLoadConfig(configPath)
+            var userConfigOnDisk = TryLoadConfig(configPath);
+            var userConfig = userConfigOnDisk
                 ?? TryLoadConfig(Path.Combine(mod.Directory, "Config.json"));
 
             // For p5rpc.modloader, ensure P5RConfig.IntroSkip defaults to false
             // if no user config exists yet.
             if (mod.ModId.Equals(P5RModLoaderId, StringComparison.OrdinalIgnoreCase)
                 && userConfig is null
-                && !File.Exists(configPath))
+                && userConfigOnDisk is null)
             {
                 userConfig = new JsonObject
                 {
@@ -170,16 +172,29 @@ public sealed class ModCatalog(string gameDirectory)
                     {
                         userConfig = dllConfig;
                         // Persist the seeded config so future reads don't need the DLL.
-                        try
-                        {
-                            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-                            File.WriteAllText(configPath,
-                                dllConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-                        }
-                        catch { /* best-effort */ }
+                        WriteConfig(configPath, dllConfig);
                     }
                 }
                 catch { /* DLL inspection can fail on arch mismatch etc. — skip silently. */ }
+            }
+
+            // The FPS unlocker ships with an effectively uncapped 99999 FPS
+            // default. Seed a user config at ~240 so its settings are editable
+            // before the mod's first run, but never override a user's own file.
+            if (mod.ModId.Equals(KnownModConfigDefaults.FpsUnlockerModId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (userConfigOnDisk is null)
+                {
+                    userConfig ??= KnownModConfigDefaults.CreateFpsUnlockerConfig();
+                    userConfig["MaxFps"] = KnownModConfigDefaults.FpsUnlockerDefaultMaxFps;
+                    KnownModConfigDefaults.FillFpsUnlockerMissingSettings(userConfig);
+                    WriteConfig(configPath, userConfig);
+                }
+                else if (userConfig is not null &&
+                         KnownModConfigDefaults.FillFpsUnlockerMissingSettings(userConfig))
+                {
+                    WriteConfig(configPath, userConfig);
+                }
             }
 
             // For p5rpc.modloader, ensure P5RConfig.IntroSkip exists and defaults to false
@@ -340,6 +355,21 @@ public sealed class ModCatalog(string gameDirectory)
         catch (JsonException)
         {
             return null;
+        }
+    }
+
+    private static void WriteConfig(string path, JsonObject config)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path,
+                config.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch
+        {
+            // Best-effort seeding: the overlay can still edit the in-memory copy
+            // and SaveConfig will report a real failure if the user changes it.
         }
     }
 

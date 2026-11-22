@@ -6,8 +6,9 @@ using System.Text.Json.Nodes;
 namespace ReloadedDropIn.Overlay;
 
 /// <summary>
-/// Reads the friendly config-setting labels (the <c>[Display(Name = ...)]</c> attribute)
-/// from a mod's compiled DLL so the overlay can show them instead of the raw JSON keys.
+/// Reads the friendly config-setting labels (<c>[Display(Name = ...)]</c> and
+/// <c>[DisplayName("...")]</c> attributes) from a mod's compiled DLL so the overlay
+/// can show them instead of the raw JSON keys.
 ///
 /// Uses <see cref="MetadataLoadContext"/>, which reads assembly metadata in isolation:
 /// the mod's code and its dependencies are never executed or loaded into the game
@@ -19,6 +20,11 @@ internal static class ModConfigMetadata
 {
     private const string DisplayAttributeName =
         "System.ComponentModel.DataAnnotations.DisplayAttribute";
+
+    // p5rpc.fpsUnlocker and other Reloaded template mods use the shorter
+    // System.ComponentModel.DisplayName attribute instead.
+    private const string DisplayNameAttributeName =
+        "System.ComponentModel.DisplayNameAttribute";
 
     private const string JsonPropertyNameAttributeName =
         "System.Text.Json.Serialization.JsonPropertyNameAttribute";
@@ -255,16 +261,38 @@ internal static class ModConfigMetadata
     {
         foreach (var attribute in property.GetCustomAttributesData())
         {
-            if (!TryGetFullName(attribute, out var fullName) || fullName != DisplayAttributeName)
+            if (!TryGetFullName(attribute, out var fullName))
                 continue;
 
-            foreach (var named in attribute.NamedArguments)
+            if (fullName == DisplayAttributeName)
             {
-                if (named.MemberName == "Name" &&
-                    named.TypedValue.Value is string name &&
-                    !string.IsNullOrWhiteSpace(name))
+                foreach (var named in attribute.NamedArguments)
                 {
-                    return name;
+                    if (named.MemberName == "Name" &&
+                        named.TypedValue.Value is string name &&
+                        !string.IsNullOrWhiteSpace(name))
+                    {
+                        return name;
+                    }
+                }
+            }
+            else if (fullName == DisplayNameAttributeName)
+            {
+                if (attribute.ConstructorArguments.Count > 0 &&
+                    attribute.ConstructorArguments[0].Value is string ctorName &&
+                    !string.IsNullOrWhiteSpace(ctorName))
+                {
+                    return ctorName;
+                }
+
+                foreach (var named in attribute.NamedArguments)
+                {
+                    if (named.MemberName == "DisplayName" &&
+                        named.TypedValue.Value is string name &&
+                        !string.IsNullOrWhiteSpace(name))
+                    {
+                        return name;
+                    }
                 }
             }
         }
