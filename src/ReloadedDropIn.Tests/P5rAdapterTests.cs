@@ -75,7 +75,7 @@ public class P5rAdapterTests : IDisposable
 
         var fpsUnlocker = Assert.Single(required, m => m.Id == "p5rpc.fpsUnlocker");
         Assert.True(fpsUnlocker.Enabled);
-        Assert.Equal("AnimatedSwine37/p5rpc.fpsUnlocker", fpsUnlocker.UpdateRepo);
+        Assert.Equal("Internetperson-dev/p5rpc.fpsUnlocker", fpsUnlocker.UpdateRepo);
         Assert.Equal("p5rpc.fpsUnlocker", fpsUnlocker.UpdateAssetPrefix);
 
         var performanceFix = Assert.Single(required, m => m.Id == "p5rpc.performancefix");

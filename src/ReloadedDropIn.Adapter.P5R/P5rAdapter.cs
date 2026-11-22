@@ -68,10 +68,14 @@ public sealed class P5rAdapter : IGameAdapter
         // FPS unlocker (uncap the framerate via an ASMP hook) and the performance
         // fix (frame pacing / busy-place FPS improvements). Both are required +
         // enabled base mods, fetched from their official GitHub releases.
+        // The FPS unlocker comes from the Internetperson-dev fork of
+        // AnimatedSwine37's mod: its 1.0.1 build also fixes the Persona fade
+        // timing regression that made effects linger at high FPS (upstream
+        // issue #2).
         new RequiredMod
         {
             Id = "p5rpc.fpsUnlocker", Enabled = true,
-            UpdateRepo = "AnimatedSwine37/p5rpc.fpsUnlocker",
+            UpdateRepo = "Internetperson-dev/p5rpc.fpsUnlocker",
             UpdateAssetPrefix = "p5rpc.fpsUnlocker",
         },
         new RequiredMod

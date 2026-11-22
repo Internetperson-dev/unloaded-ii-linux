@@ -45,7 +45,10 @@ environment to skip the overlay and all of its hooks entirely.
 In P5R, the FPS Unlocker's limit is seeded to 240 FPS when no user config exists.
 Change it in the INSERT panel under **Base mods > FPS Unlocker > settings > FPS
 Limit**; an existing value is never overwritten, and edits apply on the next
-game launch.
+game launch. The downloaded build is the
+[Internetperson-dev fork](https://github.com/Internetperson-dev/p5rpc.fpsUnlocker)
+of AnimatedSwine37's FPS Unlocker, which also fixes the Persona fade timing
+regression at high FPS.
 
 ## Supported games
 

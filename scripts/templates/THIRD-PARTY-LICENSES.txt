@@ -129,8 +129,9 @@ Persona 5 Royal
 
   p5rpc.fpsUnlocker
     Author: AnimatedSwine37
+    Fork: Internetperson-dev (high-FPS Persona fade timing fix)
     License: GPL-3.0
-    Source: https://github.com/AnimatedSwine37/p5rpc.fpsUnlocker
+    Source: https://github.com/Internetperson-dev/p5rpc.fpsUnlocker
 
   p5rpc.performancefix
     Author: Zelkin
