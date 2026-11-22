@@ -37,6 +37,7 @@ public sealed class CursorLiberator
 
     private volatile int _anchorX = -1;
     private volatile int _anchorY = -1;
+    private bool _active;
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr GetModuleHandleW(string moduleName);
@@ -56,6 +57,37 @@ public sealed class CursorLiberator
         _clipCursor = hooks
             .CreateHook<ClipCursorFn>(ClipCursorImpl, (long)GetProcAddress(user32, "ClipCursor"))
             .Activate();
+
+        // Games call GetCursorPos/SetCursorPos many times per frame. Leaving
+        // these hooks active while the panel is closed would route every call
+        // through a managed delegate; keep them dormant until the panel opens.
+        DisableAll();
+    }
+
+    /// <summary>Toggles the cursor hooks. Call only when panel visibility changes.</summary>
+    public void SetActive(bool active)
+    {
+        if (_active == active)
+            return;
+        _active = active;
+
+        if (active)
+        {
+            _setCursorPos?.Enable();
+            _getCursorPos?.Enable();
+            _clipCursor?.Enable();
+        }
+        else
+        {
+            DisableAll();
+        }
+    }
+
+    private void DisableAll()
+    {
+        _setCursorPos?.Disable();
+        _getCursorPos?.Disable();
+        _clipCursor?.Disable();
     }
 
     private int SetCursorPosImpl(int x, int y)

@@ -18,8 +18,13 @@ public sealed record OverlayOverrides
     /// </summary>
     public string[] DisabledOptions { get; init; } = [];
 
-    /// <summary>Hides the corner watermark drawn by the overlay mod.</summary>
-    public bool HideWatermark { get; init; }
+    /// <summary>
+    /// Hides the corner watermark drawn by the overlay mod. Hidden by default:
+    /// an always-visible badge forces an ImGui draw pass on every game frame.
+    /// Set to false in overrides.json (or tick "Corner watermark" in the panel)
+    /// to keep it on screen permanently.
+    /// </summary>
+    public bool HideWatermark { get; init; } = true;
 
     public static string PathFor(string dropInDirectory) =>
         Path.Combine(dropInDirectory, "overlay", "overrides.json");

@@ -89,13 +89,25 @@ public sealed class SyncRunner
                             Log($"ffxvi-patch: {line}");
                     }
 
-                    // Check for a newer drop-in release so the overlay can
-                    // show an update banner + download button.
-                    using var updateHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
-                    updateHttp.DefaultRequestHeaders.UserAgent.ParseAdd("Unloaded-II-DropIn");
-                    foreach (var line in new Update.SelfUpdateChecker(context.DropInDirectory)
-                        .CheckAsync(updateHttp, networkDeadline.Token).GetAwaiter().GetResult())
-                        Log(line);
+                    // The self-update check is cosmetic (it only feeds an
+                    // overlay banner). Run it off the critical path: the game
+                    // thread is held at its entry point until Run returns, so
+                    // waiting on GitHub here would delay every launch.
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var updateHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+                            updateHttp.DefaultRequestHeaders.UserAgent.ParseAdd("Unloaded-II-DropIn");
+                            using var checkDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                            await new Update.SelfUpdateChecker(context.DropInDirectory)
+                                .CheckAsync(updateHttp, checkDeadline.Token).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            // Best-effort: an update banner must never affect the game.
+                        }
+                    });
                 }
                 catch (OperationCanceledException)
                 {

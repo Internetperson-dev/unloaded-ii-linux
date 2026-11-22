@@ -34,6 +34,14 @@ so Faith UI mods and the mod-management panel share one DX12 hook.
 Game-specific disposable loader caches are cleared automatically so removing a
 mod cannot leave generated output active.
 
+The in-game overlay adds no steady-state render work: with the panel closed it
+forwards every frame untouched (no ImGui draw pass), its mod scan runs on a
+background thread instead of the first Present, and its cursor hooks are live
+only while the panel is open. The corner badge briefly appears at launch as
+proof the loader is active; tick "Corner watermark" in the panel to keep it on
+screen permanently. Set `RELOADED_DROPIN_DISABLE_OVERLAY=1` in the launch
+environment to skip the overlay and all of its hooks entirely.
+
 ## Supported games
 
 One universal package (`./scripts/package-release.sh`) covers every supported

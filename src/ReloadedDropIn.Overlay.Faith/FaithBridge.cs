@@ -70,7 +70,9 @@ internal sealed class FaithOverlayComponent(
                 ui.SetVisible(mainMenuOpen);
             }
 
-            ui.Render();
+            // Skip our ImGui calls entirely while the panel and badge are
+            // hidden; Faith still renders its own frame as usual.
+            ui.RenderIfNeeded();
         }
         catch (Exception ex)
         {

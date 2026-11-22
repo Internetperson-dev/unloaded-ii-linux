@@ -8,10 +8,26 @@ namespace ReloadedDropIn.Overlay;
 /// <summary>A toggleable sub-module option within a mod.</summary>
 public sealed record CatalogModOption
 {
+    private string[]? _segments;
+
     public required string Name { get; init; }
     public required string Directory { get; init; }
     public required string RelativePath { get; init; }
     public required bool Enabled { get; set; }
+
+    /// <summary>
+    /// Cached path segments for the options tree. The panel renders every frame
+    /// it is open, so splitting RelativePath there would allocate on each frame.
+    /// </summary>
+    public string[] Segments => _segments ??= SplitSegments(RelativePath);
+
+    private static string[] SplitSegments(string relativePath)
+    {
+        var path = relativePath.StartsWith("Options/", StringComparison.Ordinal)
+            ? relativePath["Options/".Length..]
+            : relativePath;
+        return path.Split('/');
+    }
 }
 
 public sealed record CatalogMod
@@ -63,6 +79,14 @@ public sealed class ModCatalog(string gameDirectory)
 
     public List<CatalogMod> Mods { get; } = [];
 
+    /// <summary>
+    /// Ready-made partitions of <see cref="Mods"/>. The panel renders every
+    /// frame it is open; filtering and allocating a new list each frame is
+    /// avoidable work on the game's render thread.
+    /// </summary>
+    public List<CatalogMod> UserMods { get; } = [];
+    public List<CatalogMod> BaseMods { get; } = [];
+
     public bool HideWatermark { get; set; }
 
     /// <summary>P3R Enhanced (P3RE.dll) is missing from the game directory.</summary>
@@ -79,6 +103,8 @@ public sealed class ModCatalog(string gameDirectory)
     public void Reload()
     {
         Mods.Clear();
+        UserMods.Clear();
+        BaseMods.Clear();
         // The overlay runs inside the game, so gameDirectory is the folder
         // holding P3R.exe (UE4: P3R/Binaries/Win64). P3RE.dll sits beside it.
         P3rEnhancedMissing = File.Exists(Path.Combine(gameDirectory, "P3R.exe"))
@@ -191,6 +217,9 @@ public sealed class ModCatalog(string gameDirectory)
         Mods.Sort((a, b) => a.IsBaseMod != b.IsBaseMod
             ? a.IsBaseMod.CompareTo(b.IsBaseMod)
             : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+
+        foreach (var mod in Mods)
+            (mod.IsBaseMod ? BaseMods : UserMods).Add(mod);
     }
 
     private const string P5RModLoaderId = "p5rpc.modloader";

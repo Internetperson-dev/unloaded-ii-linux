@@ -9,21 +9,40 @@ namespace ReloadedDropIn.Overlay;
 /// The Dear ImGui overlay window. Rendered every frame by the swapchain hook;
 /// INSERT toggles visibility. All changes are saved to disk immediately and
 /// applied by the drop-in's sync on the next game launch.
+///
+/// The panel is completely idle while closed: <see cref="ShouldRenderFrame"/>
+/// is a cheap input poll that tells the Present hook to forward the frame
+/// untouched when there is nothing to draw. Mod discovery (including DLL
+/// metadata reads) runs on a background thread, never on the render thread.
 /// </summary>
-public sealed class OverlayUi(
-    string gameDirectory,
-    IOverlayImGui imgui,
-    Action<string> log,
-    bool handleToggleKey = true)
+public sealed class OverlayUi
 {
     private const int VK_INSERT = 0x2D;
 
-    private readonly ModCatalog _catalog = new(gameDirectory);
-    private readonly IOverlayImGui _imgui = imgui;
+    /// <summary>
+    /// The corner badge appears briefly at launch as proof the loader is
+    /// active, then disappears unless the user pins it from the panel.
+    /// </summary>
+    private const long WatermarkShowMilliseconds = 10_000;
+
+    private readonly string _gameDirectory;
+    private readonly IOverlayImGui _imgui;
+    private readonly Action<string> _log;
+    private readonly Action<bool>? _setCursorHooksEnabled;
+    private readonly long _watermarkDeadline = Environment.TickCount64 + WatermarkShowMilliseconds;
+
+    private ModCatalog _catalog;
+    private volatile bool _catalogReady;
+    private int _reloadRunning;
+    private int _reloadPending;
+
     private bool _visible;
-    private bool _catalogLoaded;
     private bool _scaleApplied;
-    private bool _insertHeld;
+    private volatile bool _togglePressed;
+    private volatile bool _suspended;
+    private int _keyPollerStarted;
+    private bool _cursorHooksActive;
+    private bool _cursorHookFaulted;
     private bool _pendingRelaunchChanges;
     private string? _lastSaveError;
 
@@ -47,31 +66,91 @@ public sealed class OverlayUi(
 
     private static readonly Guid FolderDownloads = new("374DE290-123F-4565-9164-39C4925E467B");
 
-    private string DisplayVersion => _catalog.DropInVersion.EndsWith("-dev")
-        ? _catalog.DropInVersion[..^4]
-        : _catalog.DropInVersion;
+    public OverlayUi(
+        string gameDirectory,
+        IOverlayImGui imgui,
+        Action<string> log,
+        bool handleToggleKey = true,
+        Action<bool>? setCursorHooksEnabled = null)
+    {
+        _gameDirectory = gameDirectory;
+        _imgui = imgui;
+        _log = log;
+        _setCursorHooksEnabled = setCursorHooksEnabled;
+        _handleToggleKey = handleToggleKey;
+        _catalog = new ModCatalog(gameDirectory);
+
+        // Start before the first frame: a synchronous mod scan here would stall
+        // the game's first Present for as long as the DLL metadata reads take.
+        RequestReload();
+        StartKeyPoller();
+    }
+
+    /// <summary>
+    /// Polls INSERT off the render thread. The game's Present hook then only
+    /// reads a volatile flag instead of calling GetAsyncKeyState every frame.
+    /// </summary>
+    private void StartKeyPoller()
+    {
+        if (!_handleToggleKey || Interlocked.CompareExchange(ref _keyPollerStarted, 1, 0) != 0)
+            return;
+
+        var thread = new Thread(() =>
+        {
+            var held = false;
+            while (true)
+            {
+                // Renderers that own the menu key (uih D3D12) opt out after
+                // MenuOpenSource is assigned in the object initializer.
+                if (!_suspended && MenuOpenSource is null)
+                {
+                    var down = (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0;
+                    if (down && !held)
+                        _togglePressed = true;
+                    held = down;
+                }
+                Thread.Sleep(30);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "dropin-overlay-key-poller",
+        };
+        thread.Start();
+    }
+
+    private readonly bool _handleToggleKey;
+
+    /// <summary>Atomically published, fully populated catalog snapshot.</summary>
+    private ModCatalog Catalog => Volatile.Read(ref _catalog);
 
     /// <summary>
     /// Cheap per-frame gate for the D3D11 Present hook. Polls the toggle input
     /// without touching ImGui or the device, then reports whether this frame
-    /// actually has anything to draw. When the panel is closed and the
-    /// watermark is hidden the hook can skip ImGui entirely — on Wine/DXVK the
-    /// ImGui COM interop and empty draw pass cost several milliseconds a frame.
+    /// actually has anything to draw. With the menu closed and the badge
+    /// hidden the hook forwards the frame untouched — no ImGui new-frame, draw
+    /// pass, or COM interop on Wine/DXVK.
     /// </summary>
     public bool ShouldRenderFrame()
     {
-        EnsureCatalogLoaded();
         PollToggleInput();
-        return _visible || !_catalog.HideWatermark;
+        return _visible || WatermarkVisible(Catalog);
     }
 
-    private void EnsureCatalogLoaded()
+    /// <summary>
+    /// For renderers that own their ImGui frame (native uih D3D12, Faith),
+    /// skip our managed UI calls entirely while idle. uih/Faith still render
+    /// their own frame; this avoids the managed -> native P/Invoke stream for
+    /// controls that are not on screen.
+    /// </summary>
+    public void RenderIfNeeded()
     {
-        if (_catalogLoaded)
-            return;
-        SafeReload();
-        _catalogLoaded = true;
+        if (ShouldRenderFrame())
+            Render();
     }
+
+    private bool WatermarkVisible(ModCatalog catalog) =>
+        !catalog.HideWatermark || unchecked(Environment.TickCount64 - _watermarkDeadline) < 0;
 
     private void PollToggleInput()
     {
@@ -79,20 +158,104 @@ public sealed class OverlayUi(
         {
             var visible = MenuOpenSource();
             if (visible && !_visible)
-                SafeReload();
+                RequestReload();
             _visible = visible;
         }
-        else if (handleToggleKey)
+        else if (_handleToggleKey && _togglePressed)
         {
-            HandleToggleKey();
+            // Consume the edge queued by the background key poller. No
+            // user32 call on the game's render thread while idle.
+            _togglePressed = false;
+            _visible = !_visible;
+            if (_visible)
+                RequestReload();
         }
 
         CursorLiberator.PanelOpen = _visible;
+
+        // Cursor hooks are the only always-installed managed callbacks in the
+        // input path; enable them only for the frames where the panel is open.
+        if (_cursorHooksActive != _visible && !_cursorHookFaulted)
+        {
+            _cursorHooksActive = _visible;
+            try
+            {
+                _setCursorHooksEnabled?.Invoke(_visible);
+            }
+            catch (Exception ex)
+            {
+                _cursorHookFaulted = true;
+                _log($"cursor hook toggle failed: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Queues a catalog reload. Repeated requests (rapid toggles, a rescan
+    /// click) coalesce into one background scan; nothing blocks the renderer.
+    /// </summary>
+    private void RequestReload()
+    {
+        Volatile.Write(ref _reloadPending, 1);
+        StartReloadWorker();
+    }
+
+    private void StartReloadWorker()
+    {
+        if (Interlocked.CompareExchange(ref _reloadRunning, 1, 0) != 0)
+            return;
+
+        // Dedicated low-priority thread: the scan (file I/O + assembly metadata)
+        // must not run on the render thread or steal cycles from game threads.
+        var thread = new Thread(ReloadLoop)
+        {
+            IsBackground = true,
+            Name = "dropin-overlay-mod-scan",
+        };
+        try
+        {
+            thread.Priority = ThreadPriority.BelowNormal;
+        }
+        catch
+        {
+            // Some runtimes reject priority changes; the scan still works.
+        }
+        thread.Start();
+    }
+
+    private void ReloadLoop()
+    {
+        try
+        {
+            do
+            {
+                Volatile.Write(ref _reloadPending, 0);
+                var catalog = new ModCatalog(_gameDirectory);
+                catalog.Reload();
+                Volatile.Write(ref _catalog, catalog);
+                _catalogReady = true;
+            }
+            while (Volatile.Read(ref _reloadPending) == 1);
+        }
+        catch (Exception ex)
+        {
+            _log($"mod scan failed: {ex.Message}");
+            // Show an empty list rather than "Loading mods..." forever.
+            Volatile.Write(ref _catalog, new ModCatalog(_gameDirectory));
+            _catalogReady = true;
+        }
+        finally
+        {
+            Volatile.Write(ref _reloadRunning, 0);
+            // A request may have landed after the loop's last check.
+            if (Volatile.Read(ref _reloadPending) == 1)
+                StartReloadWorker();
+        }
     }
 
     public void Render()
     {
-        EnsureCatalogLoaded();
+        var catalog = Catalog;
 
         if (!_scaleApplied)
         {
@@ -100,18 +263,17 @@ public sealed class OverlayUi(
             _scaleApplied = true;
         }
 
-        RenderWatermark();
+        RenderWatermark(catalog);
 
-        // The D3D11 hook already polls input in ShouldRenderFrame; the native
-        // D3D12 path does not, so keep the poll here for that renderer. It is
-        // idempotent for the D3D11 path (edge detection lives in _insertHeld).
+        // The D3D11 hook already polls input in ShouldRenderFrame; the other
+        // renderers call ShouldRenderFrame via RenderIfNeeded. Keep the poll
+        // here as well: edge detection lives in _insertHeld, so it is safe.
         PollToggleInput();
 
         // Games hide the hardware cursor; have ImGui draw a software cursor
         // while the panel is open so the mouse is usable. CursorLiberator's
         // hooks read PanelOpen to stop the game recentering/capturing it.
         _imgui.SetMouseDrawCursor(_visible);
-        CursorLiberator.PanelOpen = _visible;
 
         if (!_visible)
             return;
@@ -119,36 +281,44 @@ public sealed class OverlayUi(
         var open = true;
         // "###" keeps the window ID stable while the visible title carries the
         // version, so ImGui window state survives version changes.
-        if (!_imgui.Begin($"Reloaded-II Drop-In v{DisplayVersion}###dropin-panel", ref open, WindowNoCollapse))
+        if (!_imgui.Begin($"Reloaded-II Drop-In v{FormatVersion(catalog.DropInVersion)}###dropin-panel", ref open, WindowNoCollapse))
         {
             _imgui.End();
             return;
         }
 
-        _imgui.Text($"Mods folder: {Path.Combine(gameDirectory, "mods")}");
-        RenderUpdateBanner();
-        RenderP3rEnhancedBanner();
+        _imgui.Text($"Mods folder: {Path.Combine(_gameDirectory, "mods")}");
+
+        if (!_catalogReady)
+        {
+            _imgui.TextDisabled("Loading mods...");
+            _imgui.End();
+            return;
+        }
+
+        RenderUpdateBanner(catalog);
+        RenderP3rEnhancedBanner(catalog);
         if (_lastSaveError is not null)
             _imgui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f),
                 $"SAVE FAILED - change will NOT apply: {_lastSaveError}");
         else if (_pendingRelaunchChanges)
-            _imgui.TextColored(new Vector4(1f, 0.8f, 0.2f, 1f),
+            _imgui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1f),
                 "Changes saved - they apply on the next game launch.");
         _imgui.Separator();
 
         if (_imgui.SmallButton("Rescan mods"))
-            SafeReload();
+            RequestReload();
 
         _imgui.SameLine(0, 12);
-        var showWatermark = !_catalog.HideWatermark;
+        var showWatermark = !catalog.HideWatermark;
         if (_imgui.Checkbox("Corner watermark", ref showWatermark))
         {
-            _catalog.HideWatermark = !showWatermark;
-            Save(() => _catalog.SaveToggles(), "watermark setting");
+            catalog.HideWatermark = !showWatermark;
+            Save(() => catalog.SaveToggles(), "watermark setting");
         }
 
-        RenderModList(baseMods: false, "Your mods");
-        RenderModList(baseMods: true, "Base mods (required)");
+        RenderModList(catalog, catalog.UserMods, "Your mods", baseMods: false);
+        RenderModList(catalog, catalog.BaseMods, "Base mods (required)", baseMods: true);
 
         _imgui.End();
 
@@ -156,20 +326,16 @@ public sealed class OverlayUi(
             _visible = false;
     }
 
-    private void RenderModList(bool baseMods, string header)
+    private void RenderModList(ModCatalog catalog, List<CatalogMod> mods, string header, bool baseMods)
     {
         if (!_imgui.CollapsingHeader(header, baseMods ? 0 : TreeDefaultOpen))
             return;
 
-        var any = false;
-        // Snapshot: a failed Save inside the loop reloads the catalog, which
-        // rebuilds the live Mods list.
-        foreach (var mod in _catalog.Mods.Where(m => m.IsBaseMod == baseMods).ToList())
+        foreach (var mod in mods)
         {
-            any = true;
             _imgui.PushId(mod.ModId);
 
-            if (baseMods)
+            if (mod.IsBaseMod)
             {
                 _imgui.Text($"[on] {mod.Name} {mod.Version}");
             }
@@ -179,7 +345,7 @@ public sealed class OverlayUi(
                 if (_imgui.Checkbox($"{mod.Name} {mod.Version}", ref enabled))
                 {
                     mod.Enabled = enabled;
-                    Save(() => _catalog.SaveToggles(), "toggles");
+                    Save(() => catalog.SaveToggles(), "toggles");
                 }
             }
 
@@ -187,7 +353,7 @@ public sealed class OverlayUi(
             {
                 _imgui.SameLine(0, 12);
                 var label = mod.ConfigExpanded ? "close settings" : "settings";
-                if (baseMods)
+                if (mod.IsBaseMod)
                 {
                     if (_imgui.SmallButton($"[{label}]###{mod.ModId}-cfg"))
                         mod.ConfigExpanded = !mod.ConfigExpanded;
@@ -198,24 +364,24 @@ public sealed class OverlayUi(
                         mod.ConfigExpanded = !mod.ConfigExpanded;
                 }
                 if (mod.ConfigExpanded)
-                    RenderConfigEditor(mod);
+                    RenderConfigEditor(catalog, mod);
             }
 
             if (mod.Options.Count > 0)
-                RenderModOptions(mod);
+                RenderModOptions(catalog, mod);
 
             _imgui.PopId();
         }
 
-        if (!any)
+        if (mods.Count == 0)
             _imgui.TextDisabled(baseMods ? "none" : "none yet - drop mod folders into mods/");
     }
 
-    private void RenderModOptions(CatalogMod mod)
+    private void RenderModOptions(ModCatalog catalog, CatalogMod mod)
     {
         _imgui.Indent(16);
         _imgui.TextDisabled("Options:");
-        RenderOptionTree(mod, mod.Options, depth: 0);
+        RenderOptionTree(catalog, mod.Options, depth: 0);
         _imgui.Unindent(16);
     }
 
@@ -225,14 +391,14 @@ public sealed class OverlayUi(
     /// section containing the "Ryuji Shoes" checkbox). Options directly under
     /// Options/ render as plain checkboxes.
     /// </summary>
-    private void RenderOptionTree(CatalogMod mod, List<CatalogModOption> options, int depth)
+    private void RenderOptionTree(ModCatalog catalog, List<CatalogModOption> options, int depth)
     {
         var leaves = new List<CatalogModOption>();
         var groups = new Dictionary<string, List<CatalogModOption>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var option in options)
         {
-            var segments = GetOptionSegments(option.RelativePath);
+            var segments = option.Segments;
             if (segments.Length == depth + 1)
                 leaves.Add(option);
             else
@@ -245,7 +411,7 @@ public sealed class OverlayUi(
         }
 
         foreach (var leaf in leaves.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase))
-            RenderOptionCheckbox(mod, leaf);
+            RenderOptionCheckbox(catalog, leaf);
 
         foreach (var group in groups.OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
         {
@@ -253,34 +419,26 @@ public sealed class OverlayUi(
             if (_imgui.CollapsingHeader(group.Key, 0))
             {
                 _imgui.Indent(16);
-                RenderOptionTree(mod, group.Value, depth + 1);
+                RenderOptionTree(catalog, group.Value, depth + 1);
                 _imgui.Unindent(16);
             }
             _imgui.PopId();
         }
     }
 
-    private static string[] GetOptionSegments(string relativePath)
-    {
-        var path = relativePath.StartsWith("Options/", StringComparison.Ordinal)
-            ? relativePath["Options/".Length..]
-            : relativePath;
-        return path.Split('/');
-    }
-
-    private void RenderOptionCheckbox(CatalogMod mod, CatalogModOption option)
+    private void RenderOptionCheckbox(ModCatalog catalog, CatalogModOption option)
     {
         _imgui.PushId(option.RelativePath);
         var enabled = option.Enabled;
         if (_imgui.Checkbox(option.Name, ref enabled))
         {
             option.Enabled = enabled;
-            Save(() => _catalog.SaveToggles(), "option toggles");
+            Save(() => catalog.SaveToggles(), "option toggles");
         }
         _imgui.PopId();
     }
 
-    private void RenderConfigEditor(CatalogMod mod)
+    private void RenderConfigEditor(ModCatalog catalog, CatalogMod mod)
     {
         var config = mod.UserConfig!;
         _imgui.Indent(16);
@@ -288,7 +446,7 @@ public sealed class OverlayUi(
         _imgui.Unindent(16);
 
         if (_configChanged)
-            Save(() => _catalog.SaveConfig(mod), $"config for {mod.ModId}");
+            Save(() => catalog.SaveConfig(mod), $"config for {mod.ModId}");
         _configChanged = false;
     }
 
@@ -358,9 +516,9 @@ public sealed class OverlayUi(
         }
     }
 
-    private void RenderP3rEnhancedBanner()
+    private void RenderP3rEnhancedBanner(ModCatalog catalog)
     {
-        if (!_catalog.P3rEnhancedMissing)
+        if (!catalog.P3rEnhancedMissing)
             return;
 
         _imgui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f),
@@ -372,20 +530,20 @@ public sealed class OverlayUi(
     /// Banner shown when the sync pass found a newer release on GitHub.
     /// Offers a one-click download to the user's Downloads folder.
     /// </summary>
-    private void RenderUpdateBanner()
+    private void RenderUpdateBanner(ModCatalog catalog)
     {
-        if (!_catalog.UpdateAvailable || _catalog.UpdateDownloadUrl is null)
+        if (!catalog.UpdateAvailable || catalog.UpdateDownloadUrl is null)
             return;
 
         _imgui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f),
-            $"Update available: v{_catalog.LatestVersion} (you have v{DisplayVersion})");
+            $"Update available: v{catalog.LatestVersion} (you have v{FormatVersion(catalog.DropInVersion)})");
         _imgui.SameLine(0, 12);
 
         switch (_downloadState)
         {
             case 0: // idle
                 if (_imgui.SmallButton("Download"))
-                    StartDownload(_catalog.UpdateDownloadUrl, _catalog.LatestVersion!);
+                    StartDownload(catalog.UpdateDownloadUrl, catalog.LatestVersion!);
                 break;
             case 1: // downloading
                 _imgui.TextDisabled("downloading...");
@@ -397,10 +555,13 @@ public sealed class OverlayUi(
                 _imgui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), _downloadStatus);
                 _imgui.SameLine(0, 12);
                 if (_imgui.SmallButton("Retry"))
-                    StartDownload(_catalog.UpdateDownloadUrl, _catalog.LatestVersion!);
+                    StartDownload(catalog.UpdateDownloadUrl, catalog.LatestVersion!);
                 break;
         }
     }
+
+    private static string FormatVersion(string version) =>
+        version.EndsWith("-dev", StringComparison.Ordinal) ? version[..^4] : version;
 
     private void StartDownload(string url, string version)
     {
@@ -423,13 +584,13 @@ public sealed class OverlayUi(
 
                 _downloadStatus = $"saved to {destPath}";
                 _downloadState = 2;
-                log($"downloaded update: {destPath}");
+                _log($"downloaded update: {destPath}");
             }
             catch (Exception ex)
             {
                 _downloadStatus = $"download failed: {ex.Message}";
                 _downloadState = 3;
-                log($"update download failed: {ex.Message}");
+                _log($"update download failed: {ex.Message}");
             }
         });
     }
@@ -458,14 +619,13 @@ public sealed class OverlayUi(
     }
 
     /// <summary>
-    /// Always-on corner badge (REFramework-style) proving the loader is active:
-    /// "Unloaded-II vX · N mods". Bottom-right, click-through, toggleable from
-    /// the panel. Drawn by us instead of patching the game's version text -
-    /// rewriting the game's text tables breaks on current game builds.
+    /// Short-lived corner badge (REFramework-style) proving the loader is
+    /// active. Bottom-right, click-through, hidden from steady-state frames
+    /// unless pinned from the panel.
     /// </summary>
-    private void RenderWatermark()
+    private void RenderWatermark(ModCatalog catalog)
     {
-        if (_catalog.HideWatermark)
+        if (!WatermarkVisible(catalog))
             return;
 
         var display = _imgui.DisplaySize;
@@ -482,23 +642,10 @@ public sealed class OverlayUi(
         if (_imgui.Begin("##dropin-watermark", ref open, flags))
         {
             // ASCII only: even Latin-1 glyphs render as '?' through this stack.
-            _imgui.Text($"Unloaded-II - v{DisplayVersion} - Press Insert");
+            _imgui.Text($"Unloaded-II - v{FormatVersion(catalog.DropInVersion)} - Press Insert");
         }
 
         _imgui.End();
-    }
-
-    private void HandleToggleKey()
-    {
-        var down = (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0;
-        if (down && !_insertHeld)
-        {
-            _visible = !_visible;
-            if (_visible)
-                SafeReload();
-        }
-
-        _insertHeld = down;
     }
 
     public void ToggleVisible()
@@ -513,18 +660,28 @@ public sealed class OverlayUi(
 
         _visible = visible;
         if (visible)
-            SafeReload();
+            RequestReload();
     }
 
-    private void SafeReload()
+    /// <summary>Pauses off-thread key polling while the mod is suspended.</summary>
+    public void SetSuspended(bool suspended) => _suspended = suspended;
+
+    /// <summary>
+    /// Called when the mod is suspended: drop the cached hook state so the
+    /// next poll after Resume reinstalls the cursor hooks if the panel is open.
+    /// </summary>
+    public void ResetCursorHookState()
     {
+        _cursorHooksActive = false;
+        _cursorHookFaulted = false;
         try
         {
-            _catalog.Reload();
+            _setCursorHooksEnabled?.Invoke(false);
         }
         catch (Exception ex)
         {
-            log($"mod scan failed: {ex.Message}");
+            _cursorHookFaulted = true;
+            _log($"cursor hook toggle failed: {ex.Message}");
         }
     }
 
@@ -538,10 +695,10 @@ public sealed class OverlayUi(
         }
         catch (Exception ex)
         {
-            log($"failed to save {what}: {ex.Message}");
+            _log($"failed to save {what}: {ex.Message}");
             _lastSaveError = $"{what} ({ex.GetType().Name}: {ex.Message})";
             // Re-read disk truth so the UI can't show a toggle that didn't stick.
-            SafeReload();
+            RequestReload();
         }
     }
 

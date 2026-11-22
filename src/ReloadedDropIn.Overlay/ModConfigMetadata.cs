@@ -26,6 +26,12 @@ internal static class ModConfigMetadata
     private static readonly IReadOnlyDictionary<string, string> Empty =
         new Dictionary<string, string>();
 
+    // Enumerating the runtime directory once avoids an extra directory scan
+    // per mod (twice per mod: display names + default config).
+    private static string[]? _runtimeAssemblies;
+    private static string[] RuntimeAssemblies =>
+        _runtimeAssemblies ??= Directory.GetFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll");
+
     /// <summary>
     /// Returns a map of config JSON key to display name for the given mod DLL.
     /// Empty when the DLL is missing/unreadable or declares no display names.
@@ -69,7 +75,7 @@ internal static class ModConfigMetadata
     private static JsonObject? ReadDefaultConfigCore(string dllPath)
     {
         var paths = new List<string> { dllPath };
-        paths.AddRange(Directory.GetFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll"));
+        paths.AddRange(RuntimeAssemblies);
 
         using var mlc = new MetadataLoadContext(new PathAssemblyResolver(paths));
         var assembly = mlc.LoadFromAssemblyPath(dllPath);
@@ -190,7 +196,7 @@ internal static class ModConfigMetadata
         // from the running runtime, plus the mod DLL itself. The mod's own dependencies are
         // intentionally not required - only attribute metadata is read.
         var paths = new List<string> { dllPath };
-        paths.AddRange(Directory.GetFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll"));
+        paths.AddRange(RuntimeAssemblies);
 
         using var mlc = new MetadataLoadContext(new PathAssemblyResolver(paths));
         var assembly = mlc.LoadFromAssemblyPath(dllPath);

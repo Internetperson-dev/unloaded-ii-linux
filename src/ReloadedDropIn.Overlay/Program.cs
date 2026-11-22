@@ -41,6 +41,14 @@ public class Program : IModV2, IExports
         var loaderV2 = (IModLoader)loader;
         var logger = (ILogger)loaderV2.GetLogger();
 
+        // Escape hatch for maximum performance: no swapchain/cursor hooks and
+        // no mod scan at all when the panel is not wanted for a session.
+        if (Environment.GetEnvironmentVariable("RELOADED_DROPIN_DISABLE_OVERLAY") is not null)
+        {
+            logger.WriteLine("[dropin.overlay] disabled by RELOADED_DROPIN_DISABLE_OVERLAY; no hooks installed.");
+            return;
+        }
+
         try
         {
             var executablePath = Process.GetCurrentProcess().MainModule!.FileName;
@@ -81,7 +89,8 @@ public class Program : IModV2, IExports
             _ui = new OverlayUi(
                 gameDirectory,
                 new DearOverlayImGui(),
-                message => logger.WriteLine($"[dropin.overlay] {message}"));
+                message => logger.WriteLine($"[dropin.overlay] {message}"),
+                setCursorHooksEnabled: enabled => _cursorLiberator?.SetActive(enabled));
             var ui = _ui;
 
             try
@@ -91,6 +100,7 @@ public class Program : IModV2, IExports
             }
             catch (Exception ex)
             {
+                _cursorLiberator = null;
                 logger.WriteLine($"[dropin.overlay] cursor hooks failed (panel mouse may fight the game): {ex.Message}");
             }
 
@@ -145,7 +155,9 @@ public class Program : IModV2, IExports
                 MenuOpenSource = () => DropInOverlayNative.DropInOverlay_IsMenuOpen() != 0,
             };
 
-            _nativeRenderCallback = _ui.Render;
+            // uih renders its own frame; only call into our UI when idle gate
+            // says there is something for it to draw.
+            _nativeRenderCallback = _ui.RenderIfNeeded;
             _nativeConfig = new DropInOverlayNative.Config
             {
                 Backend = 0, // uih::Backend::None: detect D3D12/D3D11 from the first presented frame
@@ -210,6 +222,8 @@ public class Program : IModV2, IExports
     public void Suspend()
     {
         _setFaithComponentEnabled?.Invoke(false);
+        _ui?.SetSuspended(true);
+        _ui?.ResetCursorHookState();
         if (_nativeStarted)
         {
             DropInOverlayNative.DropInOverlay_Stop();
@@ -222,6 +236,7 @@ public class Program : IModV2, IExports
     public void Resume()
     {
         _setFaithComponentEnabled?.Invoke(true);
+        _ui?.SetSuspended(false);
         if (!_nativeStarted && _nativeConfig.Render != IntPtr.Zero)
         {
             try
